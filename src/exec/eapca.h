@@ -1,0 +1,73 @@
+//
+// Created by Qitong Wang on 2022/10/1.
+// Copyright (c) 2022 Université Paris Cité. All rights reserved.
+//
+
+#ifndef DSTREE_EAPCA_H
+#define DSTREE_EAPCA_H
+
+#include <vector>
+#include <list>
+
+#include "global.h"
+#include "config.h"
+#include "split.h"
+
+namespace upcite {
+namespace dstree {
+
+class EAPCA {
+ public:
+  EAPCA(const VALUE_TYPE *series_ptr,
+        ID_TYPE series_length,
+        ID_TYPE vertical_split_nsegment);
+  ~EAPCA() = default;
+
+  VALUE_TYPE get_segment(ID_TYPE segment_id,
+                         bool is_mean = true) const;
+
+  RESPONSE split(const std::shared_ptr<Config> &config,
+                 const std::shared_ptr<Split> &split,
+                 const std::vector<ID_TYPE> &segment_lengths,
+                 const std::vector<ID_TYPE> &subsegment_lengths);
+
+  ID_TYPE nsegment_, nsubsegment_;
+  std::list<VALUE_TYPE> mean_, std_;
+  std::list<VALUE_TYPE> subsegment_mean_, subsegment_std_;
+
+ private:
+  ID_TYPE nvalues_;
+  const VALUE_TYPE *series_ptr_;
+
+//  std::list<ID_TYPE> breakpoints_;
+//  std::list<ID_TYPE> subsegment_breakpoints_; // TODO redundant
+};
+
+class EAPCA_Envelope {
+ public:
+  explicit EAPCA_Envelope(const std::shared_ptr<EAPCA_Envelope> &eapca_envelope);
+  EAPCA_Envelope(const std::shared_ptr<Config> &config, ID_TYPE nsegment);
+  EAPCA_Envelope(const std::shared_ptr<Config> &config,
+                 const std::shared_ptr<EAPCA_Envelope> &parent_eapca_envelope,
+                 const std::shared_ptr<Split> &parent_split,
+                 const std::shared_ptr<upcite::Logger> &logger = nullptr);
+  ~EAPCA_Envelope() = default;
+
+  RESPONSE update(const std::shared_ptr<dstree::EAPCA> &series_eapca);
+
+  EAPCA_Envelope &operator=(const EAPCA_Envelope &eapca_envelope) = default;
+
+  ID_TYPE nsegment_, nsubsegment_;
+  std::vector<ID_TYPE> segment_lengths_, subsegment_lengths_;
+
+  std::vector<VALUE_TYPE> min_means_, max_means_, min_stds_, max_stds_;
+  std::vector<VALUE_TYPE> subsegment_min_means_, subsegment_max_means_, subsegment_min_stds_, subsegment_max_stds_;
+
+ private:
+  RESPONSE initialize_stats();
+};
+
+}
+}
+
+#endif //DSTREE_EAPCA_H

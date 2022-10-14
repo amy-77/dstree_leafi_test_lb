@@ -1,0 +1,53 @@
+//
+// Created by Qitong Wang on 2022/10/1.
+// Copyright (c) 2022 Université Paris Cité. All rights reserved.
+//
+
+#ifndef DSTREE_CONFIG_H
+#define DSTREE_CONFIG_H
+
+#include <string>
+#include <memory>
+
+#include "global.h"
+
+#include "logger.h"
+
+namespace upcite {
+namespace dstree {
+
+class Config {
+ public:
+  Config(int argc, char *argv[]);
+  ~Config() = default;
+
+  void log(std::shared_ptr<upcite::Logger> &logger);
+
+  std::string log_filepath_;
+
+  std::string db_filepath_;
+  std::string query_filepath_;
+
+  ID_TYPE series_length_;
+  bool is_znormalized_;
+
+  ID_TYPE db_nseries_;
+  ID_TYPE query_nseries_;
+  ID_TYPE leaf_max_nseries_;
+
+  ID_TYPE batch_load_nseries_;
+  ID_TYPE default_nbuffer_;
+
+  bool on_disk_;
+  std::string index_persist_folderpath_;
+  std::string index_persist_file_postfix_;
+
+  ID_TYPE node_nchild_;
+  ID_TYPE vertical_split_nsubsegment_;
+  VALUE_TYPE vertical_split_gain_tradeoff_factor_;
+};
+
+}
+}
+
+#endif //DSTREE_CONFIG_H

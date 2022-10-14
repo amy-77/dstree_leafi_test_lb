@@ -6,6 +6,7 @@
 *.ko
 *.obj
 *.elf
+*.slo
 
 # Linker output
 *.ilk
@@ -21,6 +22,7 @@
 *.a
 *.la
 *.lo
+*.lai
 
 # Shared objects (inc. Windows DLLs)
 *.dll
@@ -50,3 +52,39 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Fortran module files
+*.mod
+*.smod
+
+# github/gitignore/CMake.gitignore
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+cmake-build-debug
+
+# IDE files
+.idea/
+cmake-build-*/
+*.db
+*.ipch
+*.filters
+*.db-wal
+*.opendb
+*.db-shm
+*.vcxproj
+*.tcl
+*.user
+*.sln
+
+# MAC OS
+*.DS_store
+*.xcodeproj/

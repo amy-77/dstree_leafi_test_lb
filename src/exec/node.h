@@ -28,9 +28,8 @@ class Node {
        const std::shared_ptr<EAPCA_Envelope> &eapca_envelope = nullptr);
   ~Node() = default;
 
-  std::shared_ptr<Node> route(const VALUE_TYPE *series_ptr,
-                              const std::shared_ptr<dstree::EAPCA>& series_eapca,
-                              bool is_update_eapca = true) const;
+  std::shared_ptr<Node> route(const VALUE_TYPE *series_ptr) const;
+  std::shared_ptr<Node> route(const std::shared_ptr<dstree::EAPCA>& series_eapca) const;
 
   RESPONSE insert(ID_TYPE series_id, const std::shared_ptr<dstree::EAPCA> &series_eapca);
 

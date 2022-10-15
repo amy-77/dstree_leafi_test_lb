@@ -49,6 +49,10 @@ class BufferManager {
 
   RESPONSE load_batch();
 
+  VALUE_TYPE *get_series_ptr(ID_TYPE series_batch_id) {
+    return batch_load_buffer_ + config_->series_length_ * series_batch_id;
+  }
+
   ID_TYPE load_buffer_size() const { return batch_nseries_; }
   bool is_fully_loaded() const { return loaded_nseries_ == config_->db_nseries_; }
 
@@ -71,7 +75,6 @@ class BufferManager {
   std::vector<std::shared_ptr<Buffer>> node_buffers_;
   std::unordered_map<ID_TYPE, ID_TYPE> node_to_buffer_;
   std::unordered_map<ID_TYPE, ID_TYPE> buffer_to_node_;
-
 };
 
 }

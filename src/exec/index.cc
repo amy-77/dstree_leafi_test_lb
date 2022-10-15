@@ -41,26 +41,26 @@ RESPONSE dstree::Index::build() {
 }
 
 RESPONSE dstree::Index::insert(ID_TYPE batch_series_id) {
-  VALUE_TYPE *series_ptr = buffer_manager_->batch_load_buffer_ + config_->series_length_ * batch_series_id;
-
-  std::shared_ptr<dstree::EAPCA> series_eapca = std::make_shared<dstree::EAPCA>(
-      series_ptr, config_->series_length_, config_->vertical_split_nsubsegment_);
-  buffer_manager_->batch_eapca_.emplace_back(series_eapca);
+  buffer_manager_->batch_eapca_.push_back(std::make_shared<dstree::EAPCA>(
+      buffer_manager_->get_series_ptr(batch_series_id),
+      config_->series_length_,
+      config_->vertical_split_nsubsegment_));
+  std::shared_ptr<dstree::EAPCA> series_eapca = buffer_manager_->batch_eapca_[batch_series_id];
 
   std::shared_ptr<Node> target_node = root_;
 
   while (!target_node->is_leaf()) {
-    target_node = root_->route(series_ptr, series_eapca, true);
+    target_node = root_->route(series_eapca);
   }
 
   if (target_node->is_full()) {
     target_node->split(config_, buffer_manager_, node_id_accumulator_, logger_);
     node_id_accumulator_ += config_->node_nchild_;
 
-    target_node = target_node->route(series_ptr, series_eapca, true);
+    target_node = target_node->route(series_eapca);
   }
 
-  return target_node->insert(batch_series_id, buffer_manager_->batch_eapca_[batch_series_id]);
+  return target_node->insert(batch_series_id, series_eapca);
 }
 
 RESPONSE dstree::Index::load() {

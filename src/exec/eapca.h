@@ -23,8 +23,10 @@ class EAPCA {
         ID_TYPE vertical_split_nsegment);
   ~EAPCA() = default;
 
-  VALUE_TYPE get_segment(ID_TYPE segment_id,
-                         bool is_mean = true) const;
+  VALUE_TYPE get_segment_value(ID_TYPE segment_id,
+                               bool is_mean = true) const;
+  VALUE_TYPE get_subsegment_value(ID_TYPE subsegment_id,
+                            bool is_mean = true) const;
 
   RESPONSE split(const std::shared_ptr<Config> &config,
                  const std::shared_ptr<Split> &split,
@@ -32,8 +34,8 @@ class EAPCA {
                  const std::vector<ID_TYPE> &subsegment_lengths);
 
   ID_TYPE nsegment_, nsubsegment_;
-  std::list<VALUE_TYPE> mean_, std_;
-  std::list<VALUE_TYPE> subsegment_mean_, subsegment_std_;
+  std::list<VALUE_TYPE> segment_means_, segment_stds_;
+  std::list<VALUE_TYPE> subsegment_means_, subsegment_stds_;
 
  private:
   ID_TYPE nvalues_;

@@ -12,16 +12,6 @@ project(dstree CXX)
 set(TARGET dstree)
 add_executable(${TARGET} main.cc)
 
-#if (APPLE)
-#    # gcc linking problem on Mac, even after manually setting CPLUS_INCLUDE_PATH/LD_LIBRARY_PATH to gcc
-#    # TODO probably because miss-matched build version
-#    set(CMAKE_C_COMPILER /usr/local/bin/gcc-12 CACHE STRING "C compiler" FORCE)
-#    set(CMAKE_CXX_COMPILER /usr/local/bin/g++-12 CACHE STRING "C++ compiler" FORCE)
-#
-#    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -v -stdlib=libc++")
-#    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
-#endif ()
-
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #set(CMAKE_CXX_EXTENSIONS OFF)

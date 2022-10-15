@@ -105,8 +105,7 @@ std::shared_ptr<dstree::Buffer> dstree::BufferManager::create_node_buffer(ID_TYP
   std::string buffer_filepath = config_->index_persist_folderpath_ + std::to_string(node_id) +
       config_->index_persist_file_postfix_;
 
-  auto buffer = std::make_shared<dstree::Buffer>(config_->leaf_max_nseries_, buffer_filepath);
-  node_buffers_.push_back(buffer);
+  node_buffers_.push_back(std::make_shared<dstree::Buffer>(config_->leaf_max_nseries_, buffer_filepath));
 
   node_to_buffer_[node_id] = buffer_id;
   buffer_to_node_[buffer_id] = node_id;

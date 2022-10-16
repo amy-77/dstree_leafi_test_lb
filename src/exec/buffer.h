@@ -23,21 +23,24 @@ class Buffer {
  public:
   Buffer(ID_TYPE capacity,
          std::string filepath);
-  ~Buffer();
+  ~Buffer() = default;
 
-  RESPONSE insert(ID_TYPE offset);
+  RESPONSE insert(ID_TYPE offset,
+                  const std::shared_ptr<upcite::Logger> &logger = nullptr);
   RESPONSE flush(VALUE_TYPE *load_buffer,
                  VALUE_TYPE *flush_buffer,
                  ID_TYPE series_length);
   RESPONSE clean(bool if_remove_cache = false);
 
-  bool is_full() const { return nseries_ == capacity_; }
-  ID_TYPE size() const { return nseries_; }
+  ID_TYPE get_offset(ID_TYPE node_series_id) const { return offsets_[node_series_id]; }
 
-  ID_TYPE capacity_, nseries_;
-  ID_TYPE *offsets_;
+  bool is_full() const { return capacity_ > 0 && offsets_.size() == capacity_; }
+  ID_TYPE size() const { return static_cast<ID_TYPE>(offsets_.size()); }
 
  private:
+  ID_TYPE capacity_;
+  std::vector<ID_TYPE> offsets_;
+
   std::string filepath_;
 };
 

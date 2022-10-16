@@ -26,7 +26,7 @@ class EAPCA {
   VALUE_TYPE get_segment_value(ID_TYPE segment_id,
                                bool is_mean = true) const;
   VALUE_TYPE get_subsegment_value(ID_TYPE subsegment_id,
-                            bool is_mean = true) const;
+                                  bool is_mean = true) const;
 
   RESPONSE split(const std::shared_ptr<Config> &config,
                  const std::shared_ptr<Split> &split,
@@ -40,15 +40,13 @@ class EAPCA {
  private:
   ID_TYPE nvalues_;
   const VALUE_TYPE *series_ptr_;
-
-//  std::list<ID_TYPE> breakpoints_;
-//  std::list<ID_TYPE> subsegment_breakpoints_; // TODO redundant
 };
 
 class EAPCA_Envelope {
  public:
   explicit EAPCA_Envelope(const std::shared_ptr<EAPCA_Envelope> &eapca_envelope);
-  EAPCA_Envelope(const std::shared_ptr<Config> &config, ID_TYPE nsegment);
+  EAPCA_Envelope(const std::shared_ptr<Config> &config,
+                 ID_TYPE nsegment);
   EAPCA_Envelope(const std::shared_ptr<Config> &config,
                  const std::shared_ptr<EAPCA_Envelope> &parent_eapca_envelope,
                  const std::shared_ptr<Split> &parent_split,
@@ -62,7 +60,7 @@ class EAPCA_Envelope {
   ID_TYPE nsegment_, nsubsegment_;
   std::vector<ID_TYPE> segment_lengths_, subsegment_lengths_;
 
-  std::vector<VALUE_TYPE> min_means_, max_means_, min_stds_, max_stds_;
+  std::vector<VALUE_TYPE> segment_min_means_, segment_max_means_, segment_min_stds_, segment_max_stds_;
   std::vector<VALUE_TYPE> subsegment_min_means_, subsegment_max_means_, subsegment_min_stds_, subsegment_max_stds_;
 
  private:

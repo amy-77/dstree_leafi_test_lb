@@ -184,6 +184,7 @@ VALUE_TYPE dstree::EAPCA::get_subsegment_value(ID_TYPE subsegment_id, bool is_me
     return *std_iter;
   }
 }
+
 dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<dstree::EAPCA_Envelope> &eapca_envelope) {
   nsegment_ = eapca_envelope->nsegment_;
   nsubsegment_ = eapca_envelope->nsubsegment_;
@@ -191,10 +192,10 @@ dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<dstree::EAPCA_Envel
   segment_lengths_ = eapca_envelope->segment_lengths_;
   subsegment_lengths_ = eapca_envelope->subsegment_lengths_;
 
-  min_means_ = eapca_envelope->min_means_;
-  max_means_ = eapca_envelope->max_means_;
-  min_stds_ = eapca_envelope->min_stds_;
-  max_stds_ = eapca_envelope->max_stds_;
+  segment_min_means_ = eapca_envelope->segment_min_means_;
+  segment_max_means_ = eapca_envelope->segment_max_means_;
+  segment_min_stds_ = eapca_envelope->segment_min_stds_;
+  segment_max_stds_ = eapca_envelope->segment_max_stds_;
 
   subsegment_min_means_ = eapca_envelope->subsegment_min_means_;
   subsegment_max_means_ = eapca_envelope->subsegment_max_means_;
@@ -305,12 +306,14 @@ dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<Config> &config,
   }
 
 #ifdef DEBUG
+#ifndef DEBUGGED
   if (logger != nullptr) {
     MALAT_LOG(logger->logger, trivial::debug) << boost::format("nsegment_ = %d, segment_lengths_.size() = %d")
           % nsegment_ % segment_lengths_.size();
     MALAT_LOG(logger->logger, trivial::debug) << boost::format("nsubsegment_ = %d, subsegment_lengths_.size() = %d")
           % nsubsegment_ % subsegment_lengths_.size();
   }
+#endif
 
   assert(nsegment_ == segment_lengths_.size());
   assert(nsubsegment_ == subsegment_lengths_.size());
@@ -320,10 +323,10 @@ dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<Config> &config,
 }
 
 RESPONSE dstree::EAPCA_Envelope::initialize_stats() {
-  min_means_.assign(nsegment_, constant::MAX_VALUE);
-  max_means_.assign(nsegment_, constant::MIN_VALUE);
-  min_stds_.assign(nsegment_, constant::MAX_VALUE);
-  max_stds_.assign(nsegment_, constant::MIN_VALUE);
+  segment_min_means_.assign(nsegment_, constant::MAX_VALUE);
+  segment_max_means_.assign(nsegment_, constant::MIN_VALUE);
+  segment_min_stds_.assign(nsegment_, constant::MAX_VALUE);
+  segment_max_stds_.assign(nsegment_, constant::MIN_VALUE);
 
   subsegment_min_means_.assign(nsubsegment_, constant::MAX_VALUE);
   subsegment_max_means_.assign(nsubsegment_, constant::MIN_VALUE);
@@ -339,16 +342,16 @@ RESPONSE dstree::EAPCA_Envelope::update(const std::shared_ptr<dstree::EAPCA> &se
     auto std_iter = series_eapca->segment_stds_.cbegin();
 
     for (ID_TYPE i = 0; i < series_eapca->nsegment_; ++i, ++mean_iter, ++std_iter) {
-      if (min_means_[i] > *mean_iter) {
-        min_means_[i] = *mean_iter;
-      } else if (max_means_[i] < *mean_iter) {
-        max_means_[i] = *mean_iter;
+      if (segment_min_means_[i] > *mean_iter) {
+        segment_min_means_[i] = *mean_iter;
+      } else if (segment_max_means_[i] < *mean_iter) {
+        segment_max_means_[i] = *mean_iter;
       }
 
-      if (min_stds_[i] > *std_iter) {
-        min_stds_[i] = *std_iter;
-      } else if (max_stds_[i] < *std_iter) {
-        max_stds_[i] = *std_iter;
+      if (segment_min_stds_[i] > *std_iter) {
+        segment_min_stds_[i] = *std_iter;
+      } else if (segment_max_stds_[i] < *std_iter) {
+        segment_max_stds_[i] = *std_iter;
       }
     }
 

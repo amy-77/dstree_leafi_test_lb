@@ -40,18 +40,47 @@ dstree::Node::Node(std::shared_ptr<dstree::Config> config,
   }
 }
 
-std::shared_ptr<dstree::Node> dstree::Node::route(const std::shared_ptr<dstree::EAPCA> &series_eapca) const {
+std::shared_ptr<dstree::Node> dstree::Node::route(const std::shared_ptr<dstree::EAPCA> &series_eapca,
+                                                  const std::shared_ptr<upcite::Logger> &logger) const {
   ID_TYPE target_child_id = 0;
 
-  if (split_->is_vertical_split_) {
-    series_eapca->split(config_, split_, eapca_envelope_->segment_lengths_, eapca_envelope_->subsegment_lengths_);
+#ifdef DEBUG
+#ifndef DEBUGGED
+  if (logger != nullptr) {
+    MALAT_LOG(logger->logger, trivial::debug)
+      << boost::format("before: vertical_split = %d, node %d - %d == series %d - %d")
+          % split_->is_vertical_split_
+          % eapca_envelope_->nsegment_
+          % eapca_envelope_->nsubsegment_
+          % series_eapca->nsegment_
+          % series_eapca->nsubsegment_;
+  }
+#endif
+#endif
 
-    target_child_id = split_->route(series_eapca->get_segment_value(
+  if (split_->is_vertical_split_) {
+    target_child_id = split_->route(series_eapca->get_subsegment_value(
         split_->split_subsegment_id_, split_->horizontal_split_mode_ == MEAN));
+
+    series_eapca->split(config_, split_, eapca_envelope_->segment_lengths_, eapca_envelope_->subsegment_lengths_);
   } else {
     target_child_id = split_->route(series_eapca->get_segment_value(
         split_->split_segment_id_, split_->horizontal_split_mode_ == MEAN));
   }
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+  if (logger != nullptr) {
+    MALAT_LOG(logger->logger, trivial::debug)
+      << boost::format("after: vertical_split = %d, node %d - %d == series %d - %d")
+          % split_->is_vertical_split_
+          % eapca_envelope_->nsegment_
+          % eapca_envelope_->nsubsegment_
+          % series_eapca->nsegment_
+          % series_eapca->nsubsegment_;
+  }
+#endif
+#endif
 
   return children_[target_child_id];
 }
@@ -67,14 +96,60 @@ std::shared_ptr<dstree::Node> dstree::Node::route(const VALUE_TYPE *series_ptr) 
   return children_[target_child_id];
 }
 
-RESPONSE dstree::Node::insert(ID_TYPE series_id, const std::shared_ptr<dstree::EAPCA> &series_eapca) {
+RESPONSE dstree::Node::insert(ID_TYPE series_id,
+                              const std::shared_ptr<dstree::EAPCA> &series_eapca,
+                              const std::shared_ptr<upcite::Logger> &logger) {
   // TODO optimize RESPONSE operators
-  RESPONSE response = buffer_->insert(series_id);
+  RESPONSE response = buffer_->insert(series_id, logger);
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+  if (response == FAILURE && logger != nullptr) {
+    MALAT_LOG(logger->logger, trivial::debug)
+      << boost::format("node %d: %d - %d == series %d: %d - %d")
+          % id_
+          % eapca_envelope_->nsegment_
+          % eapca_envelope_->nsubsegment_
+          % series_id
+          % series_eapca->nsegment_
+          % series_eapca->nsubsegment_;
+  }
+#endif
+#endif
   response = static_cast<RESPONSE>(response || eapca_envelope_->update(series_eapca));
 
   if (response == SUCCESS) {
     nseries_ += 1;
+  } else {
+#ifdef DEBUG
+#ifndef DEBUGGED
+    if (logger != nullptr) {
+      MALAT_LOG(logger->logger, trivial::debug)
+        << boost::format("node %d: %d - %d == series %d: %d - %d")
+            % id_
+            % eapca_envelope_->nsegment_
+            % eapca_envelope_->nsubsegment_
+            % series_id
+            % series_eapca->nsegment_
+            % series_eapca->nsubsegment_;
+    }
+#endif
+#endif
   }
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+  if (logger != nullptr) {
+    MALAT_LOG(logger->logger, trivial::debug)
+      << boost::format("id_ = %d, nseries_ = %d, buffer_->size() = %d")
+          % id_
+          % nseries_
+          % buffer_->size();
+  }
+
+  assert(nseries_ == buffer_->size());
+#endif
+#endif
 
   return response;
 }
@@ -94,8 +169,8 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
   for (segment_id = 0; segment_id < eapca_envelope_->nsegment_; ++segment_id) {
     current_split->split_segment_id_ = segment_id;
 
-    mean_width = eapca_envelope_->max_means_[segment_id] - eapca_envelope_->min_means_[segment_id];
-    max_std = eapca_envelope_->max_stds_[segment_id];
+    mean_width = eapca_envelope_->segment_max_means_[segment_id] - eapca_envelope_->segment_min_means_[segment_id];
+    max_std = eapca_envelope_->segment_max_stds_[segment_id];
     segment_length = static_cast<VALUE_TYPE>(eapca_envelope_->segment_lengths_[segment_id]);
 
     range_parent = segment_length * (mean_width * mean_width + max_std * max_std);
@@ -113,7 +188,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
     quality_gain = range_parent - range_children / nchild;
 
 #ifdef DEBUG
-    //#ifndef DEBUGGED
+#ifndef DEBUGGED
     MALAT_LOG(logger->logger, trivial::debug)
       << boost::format(
           "node_id = %d, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
@@ -128,14 +203,14 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
           % quality_gain
           % range_parent
           % (range_children / nchild);
-//#endif
+#endif
 #endif
 
     if (quality_gain > best_so_far_quality_gain) {
       best_so_far_quality_gain = quality_gain;
       best_so_far_quality_gain_vertical = best_so_far_quality_gain * config_->vertical_split_gain_tradeoff_factor_;
 
-      min_mean = eapca_envelope_->min_means_[segment_id];
+      min_mean = eapca_envelope_->segment_min_means_[segment_id];
       current_split->horizontal_breakpoints_.clear();
       for (child_id = 1; child_id < config_->node_nchild_; ++child_id) {
         current_split->horizontal_breakpoints_.push_back(
@@ -160,7 +235,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
     }
 
     current_split->horizontal_split_mode_ = STD;
-    std_width_children = (max_std - eapca_envelope_->min_stds_[segment_id]) / nchild;
+    std_width_children = (max_std - eapca_envelope_->segment_min_stds_[segment_id]) / nchild;
     range_children = 0;
 
     for (child_id = 0; child_id < config_->node_nchild_; ++child_id) {
@@ -171,7 +246,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
     quality_gain = range_parent - range_children / nchild;
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
     MALAT_LOG(logger->logger, trivial::debug)
       << boost::format(
           "node_id = %d, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
@@ -186,14 +261,14 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
           % quality_gain
           % range_parent
           % (range_children / nchild);
-//#endif
+#endif
 #endif
 
     if (quality_gain > best_so_far_quality_gain) {
       best_so_far_quality_gain = quality_gain;
       best_so_far_quality_gain_vertical = best_so_far_quality_gain * config_->vertical_split_gain_tradeoff_factor_;
 
-      min_std = eapca_envelope_->min_stds_[segment_id];
+      min_std = eapca_envelope_->segment_min_stds_[segment_id];
       current_split->horizontal_breakpoints_.clear();
       for (child_id = 1; child_id < config_->node_nchild_; ++child_id) {
         current_split->horizontal_breakpoints_.push_back(
@@ -242,7 +317,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
       quality_gain = range_parent - range_children / nchild;
 
 #ifdef DEBUG
-      //#ifndef DEBUGGED
+#ifndef DEBUGGED
       MALAT_LOG(logger->logger, trivial::debug)
         << boost::format(
             "node_id = %d, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
@@ -257,7 +332,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
             % quality_gain
             % range_parent
             % (range_children / nchild);
-//#endif
+#endif
 #endif
 
       if (quality_gain > best_so_far_quality_gain_vertical) {
@@ -300,7 +375,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
       quality_gain = range_parent - range_children / nchild;
 
 #ifdef DEBUG
-      //#ifndef DEBUGGED
+#ifndef DEBUGGED
       MALAT_LOG(logger->logger, trivial::debug)
         << boost::format(
             "node_id = %d, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
@@ -315,7 +390,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
             % quality_gain
             % range_parent
             % (range_children / nchild);
-//#endif
+#endif
 #endif
 
       if (quality_gain > best_so_far_quality_gain_vertical) {
@@ -363,18 +438,17 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
-  MALAT_LOG(logger->logger, trivial::debug)
-    << boost::format(
-        "node_id = %d, best_so_far_quality_gain = %f, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, split_segment_offset_ = %d, split_segment_length_ = %d, horizontal_split_mode_ = %d, horizontal_breakpoints_ = %d")
+  MALAT_LOG(logger->logger, trivial::debug) << boost::format(
+        "parent %d, split %d-%d @ %.3f = %.3f: (%d in) %d @ %d + %d")
         % id_
-        % best_so_far_quality_gain
         % split_->is_vertical_split_
-        % split_->split_segment_id_
-        % split_->split_subsegment_id_
-        % split_->split_segment_offset_
-        % split_->split_segment_length_
         % split_->horizontal_split_mode_
-        % split_->horizontal_breakpoints_[0];
+        % split_->horizontal_breakpoints_[0]
+        % best_so_far_quality_gain
+        % split_->split_subsegment_id_
+        % split_->split_segment_id_
+        % split_->split_segment_offset_
+        % split_->split_segment_length_;
 //#endif
 #endif
 
@@ -387,31 +461,101 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
         config, buffer_manager, depth_ + 1, first_child_id + child_id, parent, child_eapca_envelope));
 
 #ifdef DEBUG
+#ifndef DEBUGGED
     MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format("child_id = %d, nsegment = %d, nsubsegment = %d")
+      << boost::format("child_id = %d, %d - %d -> %d - %d")
           % (first_child_id + child_id)
+          % eapca_envelope_->nsegment_
+          % eapca_envelope_->nsubsegment_
           % children_[child_id]->eapca_envelope_->nsegment_
           % children_[child_id]->eapca_envelope_->nsubsegment_;
 #endif
+#endif
   }
 
+#ifdef DEBUG
+#ifndef DEBUGGED
+  for (ID_TYPE node_series_id = 0; node_series_id < buffer_->size(); node_series_id += 20) {
+    MALAT_LOG(logger->logger, trivial::debug)
+      << boost::format("%d(%d): %d %d %d %d %d - %d %d %d %d %d - %d %d %d %d %d - %d %d %d %d %d")
+          % node_series_id
+          % id_
+          % buffer_->get_offset(node_series_id)
+          % buffer_->get_offset(node_series_id + 1)
+          % buffer_->get_offset(node_series_id + 2)
+          % buffer_->get_offset(node_series_id + 3)
+          % buffer_->get_offset(node_series_id + 4)
+          % buffer_->get_offset(node_series_id + 5)
+          % buffer_->get_offset(node_series_id + 6)
+          % buffer_->get_offset(node_series_id + 7)
+          % buffer_->get_offset(node_series_id + 8)
+          % buffer_->get_offset(node_series_id + 9)
+          % buffer_->get_offset(node_series_id + 10)
+          % buffer_->get_offset(node_series_id + 11)
+          % buffer_->get_offset(node_series_id + 12)
+          % buffer_->get_offset(node_series_id + 13)
+          % buffer_->get_offset(node_series_id + 14)
+          % buffer_->get_offset(node_series_id + 15)
+          % buffer_->get_offset(node_series_id + 16)
+          % buffer_->get_offset(node_series_id + 17)
+          % buffer_->get_offset(node_series_id + 18)
+          % buffer_->get_offset(node_series_id + 19);
+  }
+#endif
+#endif
+
   for (ID_TYPE node_series_id = 0; node_series_id < buffer_->size(); ++node_series_id) {
-    ID_TYPE series_batch_id = buffer_->offsets_[node_series_id];
+    ID_TYPE series_batch_id = buffer_->get_offset(node_series_id);
 
 #ifdef DEBUG
 #ifndef DEBUGGED
     MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format("node_id = %d, series_id = %d, nsegment = %d, nsubsegment = %d")
+      << boost::format("node %d(%d): %d - %d == series %d/%d: %d - %d")
           % id_
+          % split_->is_vertical_split_
+          % eapca_envelope_->nsegment_
+          % eapca_envelope_->nsubsegment_
           % series_batch_id
+          % node_series_id
           % buffer_manager->batch_eapca_[series_batch_id]->nsegment_
           % buffer_manager->batch_eapca_[series_batch_id]->nsubsegment_;
 #endif
 #endif
 
-    std::shared_ptr<dstree::Node> target_child = route(buffer_manager->batch_eapca_[series_batch_id]);
-    target_child->insert(series_batch_id, buffer_manager->batch_eapca_[series_batch_id]);
+    std::shared_ptr<dstree::Node> target_child = route(buffer_manager->batch_eapca_[series_batch_id], logger);
+    target_child->insert(series_batch_id, buffer_manager->batch_eapca_[series_batch_id], logger);
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+    MALAT_LOG(logger->logger, trivial::debug) << boost::format(
+          "node %d(%d): %d - %d -> %d: %d - %d == series %d/%d: %d - %d")
+          % id_
+          % split_->is_vertical_split_
+          % eapca_envelope_->nsegment_
+          % eapca_envelope_->nsubsegment_
+          % target_child->id_
+          % target_child->eapca_envelope_->nsegment_
+          % target_child->eapca_envelope_->nsubsegment_
+          % series_batch_id
+          % node_series_id
+          % buffer_manager->batch_eapca_[series_batch_id]->nsegment_
+          % buffer_manager->batch_eapca_[series_batch_id]->nsubsegment_;
+#endif
+#endif
   }
+
+#ifdef DEBUG
+//#ifndef DEBUGGED
+  MALAT_LOG(logger->logger, trivial::debug) << boost::format(
+        "child %d: %d == %d, child %d: %d == %d")
+        % children_[0]->id_
+        % children_[0]->nseries_
+        % children_[0]->buffer_->size()
+        % children_[1]->id_
+        % children_[1]->nseries_
+        % children_[1]->buffer_->size();
+//#endif
+#endif
 
   // TODO load flushed series, calculate their EAPCA and insert into children nodes
 

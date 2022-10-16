@@ -77,11 +77,17 @@ dstree::Config::Config(int argc, char *argv[]) :
   }
 
   if (on_disk_) {
-    index_persist_folderpath_ = fs::system_complete(fs::current_path()).string();
+    if (vm.count("index_persist_folderpath")) {
+      index_persist_folderpath_ = fs::system_complete(index_persist_folderpath_).string();
+    } else {
+      index_persist_folderpath_ = fs::system_complete(fs::current_path()).string();
+    }
 
     if (!fs::is_directory(index_persist_folderpath_)) {
       std::cout << boost::format("index_persist_folderpath %s does not exist") % index_persist_folderpath_ << std::endl;
       exit(0);
+    } else if (!fs::exists(index_persist_folderpath_)) {
+      fs::create_directory(index_persist_folderpath_);
     }
   } else {
     on_disk_ = false;
@@ -102,8 +108,24 @@ void dstree::Config::log(std::shared_ptr<upcite::Logger> &logger) {
   MALAT_LOG(logger->logger, trivial::info) << boost::format("db_filepath = %s") % db_filepath_;
   MALAT_LOG(logger->logger, trivial::info) << boost::format("query_filepath = %s") % query_filepath_;
 
+  MALAT_LOG(logger->logger, trivial::info) << boost::format("is_znormalized = %d") % is_znormalized_;
+
   MALAT_LOG(logger->logger, trivial::info) << boost::format("db_size = %d") % db_nseries_;
   MALAT_LOG(logger->logger, trivial::info) << boost::format("query_size = %d") % query_nseries_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("series_length = %d") % series_length_;
   MALAT_LOG(logger->logger, trivial::info) << boost::format("leaf_size = %d") % leaf_max_nseries_;
+
+  MALAT_LOG(logger->logger, trivial::info) << boost::format("batch_load_nseries = %d") % batch_load_nseries_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format("default_nbuffer = %d") % default_nbuffer_;
+
+  MALAT_LOG(logger->logger, trivial::info) << boost::format("on_disk = %d") % on_disk_;
+  MALAT_LOG(logger->logger, trivial::info)
+    << boost::format("index_persist_folderpath = %s") % index_persist_folderpath_;
+  MALAT_LOG(logger->logger, trivial::info)
+    << boost::format("index_persist_file_postfix = %s") % index_persist_file_postfix_;
+
+  MALAT_LOG(logger->logger, trivial::info) << boost::format("node_nchild = %d") % node_nchild_;
+  MALAT_LOG(logger->logger, trivial::info)
+    << boost::format("vertical_split_nsubsegment = %d") % vertical_split_nsubsegment_;
+  MALAT_LOG(logger->logger, trivial::info)
+    << boost::format("vertical_split_gain_tradeoff_factor = %.3f") % vertical_split_gain_tradeoff_factor_;
 }

@@ -29,14 +29,17 @@ class Node {
   ~Node() = default;
 
   std::shared_ptr<Node> route(const VALUE_TYPE *series_ptr) const;
-  std::shared_ptr<Node> route(const std::shared_ptr<dstree::EAPCA>& series_eapca) const;
+  std::shared_ptr<Node> route(const std::shared_ptr<dstree::EAPCA> &series_eapca,
+                              const std::shared_ptr<upcite::Logger> &logger = nullptr) const;
 
-  RESPONSE insert(ID_TYPE series_id, const std::shared_ptr<dstree::EAPCA> &series_eapca);
+  RESPONSE insert(ID_TYPE series_id,
+                  const std::shared_ptr<dstree::EAPCA> &series_eapca,
+                  const std::shared_ptr<upcite::Logger> &logger = nullptr);
 
   RESPONSE split(const std::shared_ptr<dstree::Config> &config,
                  const std::unique_ptr<dstree::BufferManager> &buffer_manager,
                  ID_TYPE first_child_id,
-                 const std::shared_ptr<upcite::Logger> &logger);
+                 const std::shared_ptr<upcite::Logger> &logger = nullptr);
 
   bool is_full() const { return nseries_ == config_->leaf_max_nseries_; }
   bool is_leaf() const { return children_.empty(); }
@@ -45,8 +48,11 @@ class Node {
 
   std::shared_ptr<Split> split_;
 
- private:
   ID_TYPE depth_, id_;
+  std::shared_ptr<EAPCA_Envelope> eapca_envelope_;
+
+ private:
+//  ID_TYPE depth_, id_;
   ID_TYPE nseries_;
 
   std::shared_ptr<Config> config_;
@@ -55,7 +61,7 @@ class Node {
   std::shared_ptr<Node> parent_;
   std::vector<std::shared_ptr<Node>> children_;
 
-  std::shared_ptr<EAPCA_Envelope> eapca_envelope_;
+//  std::shared_ptr<EAPCA_Envelope> eapca_envelope_;
 };
 
 }

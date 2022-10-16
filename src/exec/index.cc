@@ -30,7 +30,9 @@ RESPONSE dstree::Index::build() {
       insert(series_id);
     }
 
-    buffer_manager_->flush();
+    if (config_->on_disk_) {
+      buffer_manager_->flush();
+    }
   }
 
   if (!buffer_manager_->is_fully_loaded()) {
@@ -50,17 +52,45 @@ RESPONSE dstree::Index::insert(ID_TYPE batch_series_id) {
   std::shared_ptr<Node> target_node = root_;
 
   while (!target_node->is_leaf()) {
-    target_node = root_->route(series_eapca);
+#ifdef DEBUG
+#ifndef DEBUGGED
+    MALAT_LOG(logger_->logger, trivial::debug)
+      << boost::format("node %d(%d): %d - %d == series %d: %d - %d")
+          % target_node->id_
+          % target_node->split_->is_vertical_split_
+          % target_node->eapca_envelope_->nsegment_
+          % target_node->eapca_envelope_->nsubsegment_
+          % batch_series_id
+          % series_eapca->nsegment_
+          % series_eapca->nsubsegment_;
+#endif
+#endif
+
+    target_node = target_node->route(series_eapca, logger_);
   }
 
   if (target_node->is_full()) {
     target_node->split(config_, buffer_manager_, node_id_accumulator_, logger_);
     node_id_accumulator_ += config_->node_nchild_;
 
-    target_node = target_node->route(series_eapca);
+    target_node = target_node->route(series_eapca, logger_);
   }
 
-  return target_node->insert(batch_series_id, series_eapca);
+#ifdef DEBUG
+#ifndef DEBUGGED
+  MALAT_LOG(logger_->logger, trivial::debug)
+    << boost::format("node %d(%d): %d - %d == series %d: %d - %d")
+        % target_node->id_
+        % target_node->split_->is_vertical_split_
+        % target_node->eapca_envelope_->nsegment_
+        % target_node->eapca_envelope_->nsubsegment_
+        % batch_series_id
+        % series_eapca->nsegment_
+        % series_eapca->nsubsegment_;
+#endif
+#endif
+
+  return target_node->insert(batch_series_id, series_eapca, logger_);
 }
 
 RESPONSE dstree::Index::load() {

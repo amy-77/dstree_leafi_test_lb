@@ -17,23 +17,29 @@ namespace dstree = upcite::dstree;
 
 dstree::Buffer::Buffer(ID_TYPE capacity, std::string filepath) :
     capacity_(capacity),
-    filepath_(std::move(filepath)),
-    nseries_(0) {
-  offsets_ = static_cast<ID_TYPE *>(std::malloc(capacity_));
+    filepath_(std::move(filepath)) {
+  offsets_.reserve(capacity_);
 }
 
-dstree::Buffer::~Buffer() {
-  if (offsets_ != nullptr) {
-    std::free(offsets_);
-    offsets_ = nullptr;
+RESPONSE dstree::Buffer::insert(ID_TYPE offset,
+                                const std::shared_ptr<upcite::Logger> &logger) {
+  // TODO explicitly managing ID_TYPE * resulted in unexpected change of values in the middle
+  offsets_.push_back(offset);
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+  if (logger != nullptr) {
+    MALAT_LOG(logger->logger, trivial::debug)
+      << boost::format("%d / %d = %d == %d")
+          % size()
+          % capacity_
+          % offset
+          % offsets_[size() - 1];
   }
-}
+#endif
+#endif
 
-RESPONSE dstree::Buffer::insert(ID_TYPE offset) {
-  offsets_[nseries_] = offset;
-  nseries_ += 1;
-
-  if (nseries_ > capacity_) {
+  if (size() > capacity_) {
     std::cout << boost::format("%s: nseries > capacity") % fs::path(filepath_).filename().string() << std::endl; // TODO
   }
 
@@ -41,15 +47,15 @@ RESPONSE dstree::Buffer::insert(ID_TYPE offset) {
 }
 
 RESPONSE dstree::Buffer::flush(VALUE_TYPE *load_buffer, VALUE_TYPE *flush_buffer, ID_TYPE series_length) {
-  if (nseries_ > 0) {
+  if (size() > 0) {
     auto series_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * series_length;
 
-    for (ID_TYPE i = 0; i < nseries_; ++i) {
-      std::memcpy(flush_buffer + series_nbytes * i, load_buffer + series_nbytes * offsets_[i], series_nbytes);
+    for (ID_TYPE i = 0; i < size(); ++i) {
+      std::memcpy(flush_buffer + series_length * i, load_buffer + series_length * offsets_[i], series_nbytes);
     }
 
     std::ofstream fout(filepath_, std::ios::binary | std::ios_base::app);
-    fout.write(reinterpret_cast<char *>(flush_buffer), series_nbytes * nseries_);
+    fout.write(reinterpret_cast<char *>(flush_buffer), series_nbytes * size());
     fout.close();
 
     clean();
@@ -59,12 +65,13 @@ RESPONSE dstree::Buffer::flush(VALUE_TYPE *load_buffer, VALUE_TYPE *flush_buffer
 }
 
 RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
-  if (if_remove_cache && offsets_ != nullptr) {
-    std::free(offsets_);
-    offsets_ = nullptr;
+  offsets_.clear();
+
+  if (if_remove_cache) {
+    offsets_.shrink_to_fit();
+    capacity_ = 0;
   }
 
-  nseries_ = 0;
   return SUCCESS;
 }
 
@@ -139,17 +146,22 @@ RESPONSE dstree::BufferManager::load_batch() {
   auto batch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_->series_length_ * batch_nseries_;
 
   batch_series_offset_ = loaded_nseries_;
-  auto batch_bytes_offset = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_->series_length_ * loaded_nseries_;
+  auto batch_bytes_offset = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_->series_length_ * batch_series_offset_;
 
   db_fin_.seekg(batch_bytes_offset);
   db_fin_.read(reinterpret_cast<char *>(batch_load_buffer_), batch_nbytes);
 
   if (db_fin_.fail()) {
-    MALAT_LOG(logger_->logger, trivial::error) << boost::format("cannot read %d bytes from %s at %d")
-          % config_->db_filepath_ % batch_nbytes % batch_bytes_offset;
+    MALAT_LOG(logger_->logger, trivial::error) << boost::format(
+          "cannot read %d bytes from %s at %d")
+          % config_->db_filepath_
+          % batch_nbytes
+          % batch_bytes_offset;
 
     return FAILURE;
   }
+
+  loaded_nseries_ += batch_nseries_;
 
   return SUCCESS;
 }

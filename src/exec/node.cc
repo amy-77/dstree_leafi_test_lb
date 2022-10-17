@@ -19,10 +19,8 @@ dstree::Node::Node(std::shared_ptr<dstree::Config> config,
                    const std::unique_ptr<dstree::BufferManager> &buffer_manager,
                    ID_TYPE depth,
                    ID_TYPE id,
-                   std::shared_ptr<dstree::Node> parent,
-                   const std::shared_ptr<EAPCA_Envelope> &eapca_envelope) :
+                   const std::shared_ptr<EAPCAEnvelope> &eapca_envelope) :
     config_(std::move(config)),
-    parent_(std::move(parent)),
     depth_(depth),
     id_(id),
     nseries_(0) {
@@ -32,11 +30,11 @@ dstree::Node::Node(std::shared_ptr<dstree::Config> config,
   children_.reserve(config_->node_nchild_);
 
   if (eapca_envelope == nullptr) {
-    assert(parent == nullptr); // only root is allowed to initialize a default EAPCA envelope
+//    assert(parent == nullptr); // only root is allowed to initialize a default EAPCA envelope
 
-    eapca_envelope_ = std::make_shared<EAPCA_Envelope>(config_, 1);
+    eapca_envelope_ = std::make_shared<EAPCAEnvelope>(config_, 1);
   } else {
-    eapca_envelope_ = std::make_shared<EAPCA_Envelope>(eapca_envelope);
+    eapca_envelope_ = std::make_shared<EAPCAEnvelope>(eapca_envelope);
   }
 }
 
@@ -94,6 +92,18 @@ std::shared_ptr<dstree::Node> dstree::Node::route(const VALUE_TYPE *series_ptr) 
   target_child_id = split_->route(split_->horizontal_split_mode_ == MEAN ? mean : std);
 
   return children_[target_child_id];
+}
+
+RESPONSE dstree::Node::enqueue_leaf(std::vector<std::shared_ptr<Node>> &leaves) {
+  if (is_leaf()) {
+    leaves.push_back(shared_from_this());
+  } else {
+    for (auto child_node : children_) {
+      child_node->enqueue_leaf(leaves);
+    }
+  }
+
+  return SUCCESS;
 }
 
 RESPONSE dstree::Node::insert(ID_TYPE series_id,
@@ -436,29 +446,17 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
     split_->split_segment_length_ = eapca_envelope_->segment_lengths_[segment_id];
   }
 
-#ifdef DEBUG
-//#ifndef DEBUGGED
-  MALAT_LOG(logger->logger, trivial::debug) << boost::format(
-        "parent %d, split %d-%d @ %.3f = %.3f: (%d in) %d @ %d + %d")
-        % id_
-        % split_->is_vertical_split_
-        % split_->horizontal_split_mode_
-        % split_->horizontal_breakpoints_[0]
-        % best_so_far_quality_gain
-        % split_->split_subsegment_id_
-        % split_->split_segment_id_
-        % split_->split_segment_offset_
-        % split_->split_segment_length_;
-//#endif
-#endif
+  // error for a local-scope shared_ptr, which is on stack instead of heap
+//  std::shared_ptr<dstree::Node> parent(this);
+  // TODO libc++abi: terminating with uncaught exception of type std::__1::bad_weak_ptr: bad_weak_ptr
+//  std::shared_ptr<dstree::Node> parent = shared_from_this();
 
-  std::shared_ptr<dstree::Node> parent(this);
-  std::shared_ptr<dstree::EAPCA_Envelope> child_eapca_envelope = std::make_shared<dstree::EAPCA_Envelope>(
+  std::shared_ptr<dstree::EAPCAEnvelope> child_eapca_envelope = std::make_shared<dstree::EAPCAEnvelope>(
       config, eapca_envelope_, split_, logger);
 
   for (child_id = 0; child_id < config_->node_nchild_; ++child_id) {
     children_.push_back(std::make_shared<dstree::Node>(
-        config, buffer_manager, depth_ + 1, first_child_id + child_id, parent, child_eapca_envelope));
+        config, buffer_manager, depth_ + 1, first_child_id + child_id, child_eapca_envelope));
 
 #ifdef DEBUG
 #ifndef DEBUGGED
@@ -507,47 +505,56 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
   for (ID_TYPE node_series_id = 0; node_series_id < buffer_->size(); ++node_series_id) {
     ID_TYPE series_batch_id = buffer_->get_offset(node_series_id);
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format("node %d(%d): %d - %d == series %d/%d: %d - %d")
-          % id_
-          % split_->is_vertical_split_
-          % eapca_envelope_->nsegment_
-          % eapca_envelope_->nsubsegment_
-          % series_batch_id
-          % node_series_id
-          % buffer_manager->batch_eapca_[series_batch_id]->nsegment_
-          % buffer_manager->batch_eapca_[series_batch_id]->nsubsegment_;
-#endif
-#endif
+//#ifdef DEBUG
+//#ifndef DEBUGGED
+//    MALAT_LOG(logger->logger, trivial::debug)
+//      << boost::format("node %d(%d): %d - %d == series %d/%d: %d - %d")
+//          % id_
+//          % split_->is_vertical_split_
+//          % eapca_envelope_->nsegment_
+//          % eapca_envelope_->nsubsegment_
+//          % series_batch_id
+//          % node_series_id
+//          % buffer_manager->batch_eapca_[series_batch_id]->nsegment_
+//          % buffer_manager->batch_eapca_[series_batch_id]->nsubsegment_;
+//#endif
+//#endif
 
     std::shared_ptr<dstree::Node> target_child = route(buffer_manager->batch_eapca_[series_batch_id], logger);
     target_child->insert(series_batch_id, buffer_manager->batch_eapca_[series_batch_id], logger);
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-    MALAT_LOG(logger->logger, trivial::debug) << boost::format(
-          "node %d(%d): %d - %d -> %d: %d - %d == series %d/%d: %d - %d")
-          % id_
-          % split_->is_vertical_split_
-          % eapca_envelope_->nsegment_
-          % eapca_envelope_->nsubsegment_
-          % target_child->id_
-          % target_child->eapca_envelope_->nsegment_
-          % target_child->eapca_envelope_->nsubsegment_
-          % series_batch_id
-          % node_series_id
-          % buffer_manager->batch_eapca_[series_batch_id]->nsegment_
-          % buffer_manager->batch_eapca_[series_batch_id]->nsubsegment_;
-#endif
-#endif
+//#ifdef DEBUG
+//#ifndef DEBUGGED
+//    MALAT_LOG(logger->logger, trivial::debug) << boost::format(
+//          "node %d(%d): %d - %d -> %d: %d - %d == series %d/%d: %d - %d")
+//          % id_
+//          % split_->is_vertical_split_
+//          % eapca_envelope_->nsegment_
+//          % eapca_envelope_->nsubsegment_
+//          % target_child->id_
+//          % target_child->eapca_envelope_->nsegment_
+//          % target_child->eapca_envelope_->nsubsegment_
+//          % series_batch_id
+//          % node_series_id
+//          % buffer_manager->batch_eapca_[series_batch_id]->nsegment_
+//          % buffer_manager->batch_eapca_[series_batch_id]->nsubsegment_;
+//#endif
+//#endif
   }
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
   MALAT_LOG(logger->logger, trivial::debug) << boost::format(
-        "child %d: %d == %d, child %d: %d == %d")
+        "parent %d, split %d-%d @ %.3f = %.3f: (%d in) %d @ %d + %d, child %d (%d == %d) + %d (%d == %d)")
+        % id_
+        % split_->is_vertical_split_
+        % split_->horizontal_split_mode_
+        % split_->horizontal_breakpoints_[0]
+        % best_so_far_quality_gain
+        % split_->split_subsegment_id_
+        % split_->split_segment_id_
+        % split_->split_segment_offset_
+        % split_->split_segment_length_
         % children_[0]->id_
         % children_[0]->nseries_
         % children_[0]->buffer_->size()
@@ -561,6 +568,16 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 
   buffer_->clean(true);
   nseries_ = 0;
+
+  return SUCCESS;
+}
+
+RESPONSE dstree::Node::search(const VALUE_TYPE *series_ptr,
+                              std::shared_ptr<dstree::Answer> &answer,
+                              ID_TYPE resident_node_id) const {
+  if (resident_node_id != id_) {
+    ;
+  }
 
   return SUCCESS;
 }

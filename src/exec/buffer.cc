@@ -40,7 +40,9 @@ RESPONSE dstree::Buffer::insert(ID_TYPE offset,
 #endif
 
   if (size() > capacity_) {
-    std::cout << boost::format("%s: nseries > capacity") % fs::path(filepath_).filename().string() << std::endl; // TODO
+    // TODO
+    std::cout << boost::format("%s: nseries > capacity") % fs::path(filepath_).filename().string() << std::endl;
+    return FAILURE;
   }
 
   return SUCCESS;

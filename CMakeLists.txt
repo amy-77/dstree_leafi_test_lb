@@ -37,4 +37,6 @@ target_link_libraries(${TARGET}
         PRIVATE exec util ${Boost_LIBRARIES}
         )
 
-install(TARGETS ${TARGET} DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+install(TARGETS ${TARGET} DESTINATION ${PROJECT_SOURCE_DIR}/bin)
+
+add_subdirectory(test)

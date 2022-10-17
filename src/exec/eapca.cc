@@ -185,7 +185,7 @@ VALUE_TYPE dstree::EAPCA::get_subsegment_value(ID_TYPE subsegment_id, bool is_me
   }
 }
 
-dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<dstree::EAPCA_Envelope> &eapca_envelope) {
+dstree::EAPCAEnvelope::EAPCAEnvelope(const std::shared_ptr<dstree::EAPCAEnvelope> &eapca_envelope) {
   nsegment_ = eapca_envelope->nsegment_;
   nsubsegment_ = eapca_envelope->nsubsegment_;
 
@@ -203,8 +203,8 @@ dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<dstree::EAPCA_Envel
   subsegment_max_stds_ = eapca_envelope->subsegment_max_stds_;
 }
 
-dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<Config> &config,
-                                       ID_TYPE nsegment) {
+dstree::EAPCAEnvelope::EAPCAEnvelope(const std::shared_ptr<Config> &config,
+                                     ID_TYPE nsegment) {
   nsegment_ = nsegment;
   nsubsegment_ = nsegment_ * config->vertical_split_nsubsegment_;
 
@@ -256,10 +256,10 @@ dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<Config> &config,
   initialize_stats();
 }
 
-dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<Config> &config,
-                                       const std::shared_ptr<dstree::EAPCA_Envelope> &parent_eapca_envelope,
-                                       const std::shared_ptr<dstree::Split> &parent_split,
-                                       const std::shared_ptr<upcite::Logger> &logger) {
+dstree::EAPCAEnvelope::EAPCAEnvelope(const std::shared_ptr<Config> &config,
+                                     const std::shared_ptr<dstree::EAPCAEnvelope> &parent_eapca_envelope,
+                                     const std::shared_ptr<dstree::Split> &parent_split,
+                                     const std::shared_ptr<upcite::Logger> &logger) {
   if (parent_split->is_vertical_split_) {
     nsegment_ = parent_eapca_envelope->nsegment_ + config->vertical_split_nsubsegment_ - 1;
     nsubsegment_ = parent_eapca_envelope->nsubsegment_ +
@@ -322,7 +322,7 @@ dstree::EAPCA_Envelope::EAPCA_Envelope(const std::shared_ptr<Config> &config,
   initialize_stats();
 }
 
-RESPONSE dstree::EAPCA_Envelope::initialize_stats() {
+RESPONSE dstree::EAPCAEnvelope::initialize_stats() {
   segment_min_means_.assign(nsegment_, constant::MAX_VALUE);
   segment_max_means_.assign(nsegment_, constant::MIN_VALUE);
   segment_min_stds_.assign(nsegment_, constant::MAX_VALUE);
@@ -336,7 +336,7 @@ RESPONSE dstree::EAPCA_Envelope::initialize_stats() {
   return SUCCESS;
 }
 
-RESPONSE dstree::EAPCA_Envelope::update(const std::shared_ptr<dstree::EAPCA> &series_eapca) {
+RESPONSE dstree::EAPCAEnvelope::update(const std::shared_ptr<dstree::EAPCA> &series_eapca) {
   if (nsegment_ == series_eapca->nsegment_ && nsubsegment_ == series_eapca->nsubsegment_) {
     auto mean_iter = series_eapca->segment_means_.cbegin();
     auto std_iter = series_eapca->segment_stds_.cbegin();

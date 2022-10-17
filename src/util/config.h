@@ -16,7 +16,7 @@
 namespace upcite {
 namespace dstree {
 
-class Config {
+class Config : std::enable_shared_from_this<Config> {
  public:
   Config(int argc, char *argv[]);
   ~Config() = default;
@@ -45,6 +45,9 @@ class Config {
   ID_TYPE node_nchild_;
   ID_TYPE vertical_split_nsubsegment_;
   VALUE_TYPE vertical_split_gain_tradeoff_factor_;
+
+  bool is_exact_search_;
+  ID_TYPE search_max_nseries_;
 };
 
 }

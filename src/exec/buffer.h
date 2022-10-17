@@ -26,7 +26,7 @@ class Buffer {
   ~Buffer() = default;
 
   RESPONSE insert(ID_TYPE offset,
-                  const std::shared_ptr<upcite::Logger> &logger = nullptr);
+                  const std::shared_ptr<upcite::Logger> &logger);
   RESPONSE flush(VALUE_TYPE *load_buffer,
                  VALUE_TYPE *flush_buffer,
                  ID_TYPE series_length);

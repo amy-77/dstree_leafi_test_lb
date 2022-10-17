@@ -8,6 +8,7 @@
 
 #include <vector>
 #include <list>
+#include <memory>
 
 #include "global.h"
 #include "config.h"
@@ -42,20 +43,20 @@ class EAPCA {
   const VALUE_TYPE *series_ptr_;
 };
 
-class EAPCA_Envelope {
+class EAPCAEnvelope {
  public:
-  explicit EAPCA_Envelope(const std::shared_ptr<EAPCA_Envelope> &eapca_envelope);
-  EAPCA_Envelope(const std::shared_ptr<Config> &config,
-                 ID_TYPE nsegment);
-  EAPCA_Envelope(const std::shared_ptr<Config> &config,
-                 const std::shared_ptr<EAPCA_Envelope> &parent_eapca_envelope,
-                 const std::shared_ptr<Split> &parent_split,
-                 const std::shared_ptr<upcite::Logger> &logger = nullptr);
-  ~EAPCA_Envelope() = default;
+  explicit EAPCAEnvelope(const std::shared_ptr<EAPCAEnvelope> &eapca_envelope);
+  EAPCAEnvelope(const std::shared_ptr<Config> &config,
+                ID_TYPE nsegment);
+  EAPCAEnvelope(const std::shared_ptr<Config> &config,
+                const std::shared_ptr<EAPCAEnvelope> &parent_eapca_envelope,
+                const std::shared_ptr<Split> &parent_split,
+                const std::shared_ptr<upcite::Logger> &logger = nullptr);
+  ~EAPCAEnvelope() = default;
 
   RESPONSE update(const std::shared_ptr<dstree::EAPCA> &series_eapca);
 
-  EAPCA_Envelope &operator=(const EAPCA_Envelope &eapca_envelope) = default;
+  EAPCAEnvelope &operator=(const EAPCAEnvelope &eapca_envelope) = default;
 
   ID_TYPE nsegment_, nsubsegment_;
   std::vector<ID_TYPE> segment_lengths_, subsegment_lengths_;

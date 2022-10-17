@@ -7,6 +7,7 @@
 #define DSTREE_INDEX_H
 
 #include <memory>
+#include <vector>
 
 #include "global.h"
 #include "config.h"
@@ -27,6 +28,7 @@ class Index {
   RESPONSE dump();
 
   RESPONSE search();
+  RESPONSE search(ID_TYPE query_id, const VALUE_TYPE *series_ptr);
 
  private:
   RESPONSE insert(ID_TYPE batch_series_id);
@@ -35,9 +37,10 @@ class Index {
   std::shared_ptr<upcite::Logger> logger_;
 
   std::unique_ptr<BufferManager> buffer_manager_;
-  ID_TYPE node_id_accumulator_;
 
   std::shared_ptr<Node> root_;
+  ID_TYPE nleaf_;
+  std::vector<std::shared_ptr<Node>> leaves_;
 };
 
 }

@@ -11,6 +11,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/program_options.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 
 #include "logger.h"
 
@@ -31,7 +32,9 @@ dstree::Config::Config(int argc, char *argv[]) :
     index_persist_file_postfix_(".bin"),
     node_nchild_(2),
     vertical_split_nsubsegment_(2),
-    vertical_split_gain_tradeoff_factor_(2) {
+    vertical_split_gain_tradeoff_factor_(2),
+    is_exact_search_(false),
+    search_max_nseries_(-1) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -65,7 +68,11 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("vsplit_nsubsegment", po::value<ID_TYPE>(&vertical_split_nsubsegment_)->default_value(2),
        "Number of subsegments for vertical split")
       ("vsplit_gain_factor", po::value<VALUE_TYPE>(&vertical_split_gain_tradeoff_factor_)->default_value(2),
-       "Increase factor of vertical splits versus horizontal splits");
+       "Increase factor of vertical splits versus horizontal splits")
+      ("exact_search", po::bool_switch(&is_exact_search_)->default_value(false),
+       "Whether to conduct exact search (or approximate search)")
+      ("search_max_nseries", po::value<ID_TYPE>(&search_max_nseries_)->default_value(-1),
+       "Maximal number of series to be checked during query answering ");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -76,21 +83,20 @@ dstree::Config::Config(int argc, char *argv[]) :
     exit(0);
   }
 
-  if (on_disk_) {
-    if (vm.count("index_persist_folderpath")) {
-      index_persist_folderpath_ = fs::system_complete(index_persist_folderpath_).string();
-    } else {
-      index_persist_folderpath_ = fs::system_complete(fs::current_path()).string();
-    }
+  if (vm.count("index_persist_folderpath")) {
+    index_persist_folderpath_ = fs::system_complete(index_persist_folderpath_).string();
+  } else {
+    index_persist_folderpath_ = fs::system_complete(fs::current_path()).string();
+  }
 
+  if (on_disk_) {
     if (!fs::is_directory(index_persist_folderpath_)) {
-      std::cout << boost::format("index_persist_folderpath %s does not exist") % index_persist_folderpath_ << std::endl;
-      exit(0);
-    } else if (!fs::exists(index_persist_folderpath_)) {
       fs::create_directory(index_persist_folderpath_);
     }
-  } else {
-    on_disk_ = false;
+
+    if (!boost::algorithm::ends_with(index_persist_folderpath_, "/")) {
+      index_persist_folderpath_ += "/";
+    }
   }
 
   if (batch_load_nseries_ < 0) {
@@ -101,6 +107,15 @@ dstree::Config::Config(int argc, char *argv[]) :
     if (vm.count("vsplit_gain_factor") == 0) {
       vertical_split_gain_tradeoff_factor_ = static_cast<VALUE_TYPE>(vertical_split_nsubsegment_);
     }
+  }
+
+
+  if (is_exact_search_) {
+    if (search_max_nseries_ < 1) {
+      search_max_nseries_ = db_nseries_;
+    }
+  } else if (search_max_nseries_ > 0) {
+    is_exact_search_ = true;
   }
 }
 

@@ -4,3 +4,10 @@
 //
 
 #include "answer.h"
+
+namespace dstree = upcite::dstree;
+
+dstree::Answer::Answer(ID_TYPE query_id) :
+    query_id_(query_id) {
+
+}

@@ -56,6 +56,10 @@ class EAPCAEnvelope {
 
   RESPONSE update(const std::shared_ptr<dstree::EAPCA> &series_eapca);
 
+  VALUE_TYPE cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr,
+                                      const std::shared_ptr<upcite::Logger>& logger) const;
+  VALUE_TYPE cal_upper_bound_EDsquare(const VALUE_TYPE *series_ptr) const;
+
   EAPCAEnvelope &operator=(const EAPCAEnvelope &eapca_envelope) = default;
 
   ID_TYPE nsegment_, nsubsegment_;

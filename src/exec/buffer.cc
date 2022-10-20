@@ -15,16 +15,96 @@ namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
 
-dstree::Buffer::Buffer(ID_TYPE capacity, std::string filepath) :
+dstree::Buffer::Buffer(std::shared_ptr<upcite::Logger> logger,
+                       bool is_on_disk,
+                       ID_TYPE capacity,
+                       ID_TYPE series_length,
+                       VALUE_TYPE *global_buffer,
+                       std::string filepath) :
+    logger_(std::move(logger)),
+    is_on_disk_(is_on_disk),
     capacity_(capacity),
-    filepath_(std::move(filepath)) {
+    series_length_(series_length),
+    global_buffer_(global_buffer),
+    local_buffer_(nullptr),
+    filepath_(std::move(filepath)),
+    size_(0),
+    next_series_id_(0) {
   offsets_.reserve(capacity_);
+}
+
+dstree::Buffer::~Buffer() {
+  if (local_buffer_ != nullptr) {
+    std::free(local_buffer_);
+    local_buffer_ = nullptr;
+  }
+}
+
+const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
+  if (is_on_disk_) {
+    if (local_buffer_ == nullptr) {
+      ID_TYPE local_buffer_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * series_length_ * size_;
+      local_buffer_ = static_cast<VALUE_TYPE *>(std::malloc(local_buffer_nbytes));
+
+      if (!fs::exists(filepath_)) {
+        MALAT_LOG(logger_->logger, trivial::error) << boost::format(
+              "node file does not exist %s")
+              % filepath_;
+
+        return nullptr;
+      }
+
+      std::ifstream fin(filepath_, std::ios::in | std::ios::binary);
+      if (!fin.good()) {
+        MALAT_LOG(logger_->logger, trivial::error) << boost::format(
+              "node file cannot open %s")
+              % filepath_;
+
+        return nullptr;
+      }
+
+      fin.read(reinterpret_cast<char *>(local_buffer_), local_buffer_nbytes);
+
+      if (fin.fail()) {
+        MALAT_LOG(logger_->logger, trivial::error) << boost::format(
+              "node buffer cannot read %d bytes from %s")
+              % local_buffer_nbytes
+              % filepath_;
+
+        return nullptr;
+      }
+
+      fin.close();
+    }
+
+    if (next_series_id_ < size_) {
+      return local_buffer_ + series_length_ * next_series_id_++;
+    }
+  } else {
+    if (next_series_id_ < size_) {
+      return global_buffer_ + series_length_ * offsets_[next_series_id_++];
+    }
+  }
+
+  return nullptr;
+}
+
+RESPONSE dstree::Buffer::reset() {
+  if (local_buffer_ != nullptr) {
+    std::free(local_buffer_);
+    local_buffer_ = nullptr;
+  }
+
+  next_series_id_ = 0;
+
+  return SUCCESS;
 }
 
 RESPONSE dstree::Buffer::insert(ID_TYPE offset,
                                 const std::shared_ptr<upcite::Logger> &logger) {
   // TODO explicitly managing ID_TYPE * resulted in unexpected change of values in the middle
   offsets_.push_back(offset);
+  size_ += 1;
 
 #ifdef DEBUG
 #ifndef DEBUGGED
@@ -54,6 +134,7 @@ RESPONSE dstree::Buffer::flush(VALUE_TYPE *load_buffer, VALUE_TYPE *flush_buffer
 
     for (ID_TYPE i = 0; i < size(); ++i) {
       std::memcpy(flush_buffer + series_length * i, load_buffer + series_length * offsets_[i], series_nbytes);
+
     }
 
     std::ofstream fout(filepath_, std::ios::binary | std::ios_base::app);
@@ -114,7 +195,13 @@ std::shared_ptr<dstree::Buffer> dstree::BufferManager::create_node_buffer(ID_TYP
   std::string buffer_filepath = config_->index_persist_folderpath_ + std::to_string(node_id) +
       config_->index_persist_file_postfix_;
 
-  node_buffers_.push_back(std::make_shared<dstree::Buffer>(config_->leaf_max_nseries_, buffer_filepath));
+  node_buffers_.push_back(std::make_shared<dstree::Buffer>(
+      logger_,
+      config_->on_disk_,
+      config_->leaf_max_nseries_,
+      config_->series_length_,
+      batch_load_buffer_,
+      buffer_filepath));
 
   node_to_buffer_[node_id] = buffer_id;
   buffer_to_node_[buffer_id] = node_id;

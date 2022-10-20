@@ -48,6 +48,9 @@ class Config : std::enable_shared_from_this<Config> {
 
   bool is_exact_search_;
   ID_TYPE search_max_nseries_;
+  ID_TYPE search_max_nnode_;
+
+  ID_TYPE n_nearest_neighbor_;
 };
 
 }

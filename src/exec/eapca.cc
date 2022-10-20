@@ -377,3 +377,63 @@ RESPONSE dstree::EAPCAEnvelope::update(const std::shared_ptr<dstree::EAPCA> &ser
 
   return FAILURE;
 }
+
+VALUE_TYPE dstree::EAPCAEnvelope::cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr,
+                                                           const std::shared_ptr<upcite::Logger> &logger) const {
+  VALUE_TYPE lowe_bound_distance = 0;
+
+  VALUE_TYPE mean_diff, std_diff;
+
+  VALUE_TYPE query_segment_mean, query_segment_std;
+  ID_TYPE segment_offset = 0;
+
+  for (ID_TYPE i = 0; i < nsegment_; ++i) {
+    std::tie(query_segment_mean, query_segment_std) = upcite::cal_mean_std(
+        series_ptr + segment_offset, segment_lengths_[i]);
+
+    if (query_segment_mean < segment_min_means_[i]) {
+      mean_diff = segment_min_means_[i] - query_segment_mean;
+    } else if (query_segment_mean > segment_max_means_[i]) {
+      mean_diff = query_segment_mean - segment_max_means_[i];
+    } else {
+      mean_diff = 0;
+    }
+
+    if (query_segment_std < segment_min_stds_[i]) {
+      std_diff = segment_min_stds_[i] - query_segment_std;
+    } else if (query_segment_std > segment_max_stds_[i]) {
+      std_diff = query_segment_std - segment_max_stds_[i];
+    } else {
+      std_diff = 0;
+    }
+
+    lowe_bound_distance += static_cast<VALUE_TYPE>(segment_lengths_[i]) * (mean_diff * mean_diff + std_diff * std_diff);
+
+    segment_offset += segment_lengths_[i];
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+    MALAT_LOG(logger->logger, trivial::debug) << boost::format(
+          "([%.3f %.3f %.3f] = %.3f + [%.3f %.3f %.3f] = %.3f) * %d = %.3f, %d")
+          % segment_min_means_[i]
+          % query_segment_mean
+          % segment_max_means_[i]
+          % mean_diff
+          % segment_min_stds_[i]
+          % query_segment_std
+          % segment_max_stds_[i]
+          % std_diff
+          % segment_lengths_[i]
+          % lowe_bound_distance
+          % segment_offset;
+#endif
+#endif
+  }
+
+  return lowe_bound_distance;
+}
+
+VALUE_TYPE dstree::EAPCAEnvelope::cal_upper_bound_EDsquare(const VALUE_TYPE *series_ptr) const {
+  // TODO
+  return 0;
+}

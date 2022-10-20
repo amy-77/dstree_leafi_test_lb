@@ -5,9 +5,29 @@
 
 #include "answer.h"
 
+#include "common.h"
+
 namespace dstree = upcite::dstree;
 
-dstree::Answer::Answer(ID_TYPE query_id) :
+dstree::Answer::Answer(ID_TYPE capacity, ID_TYPE query_id) :
+    capacity_(capacity),
     query_id_(query_id) {
+  bsf_distances_ = std::priority_queue<VALUE_TYPE, std::vector<VALUE_TYPE>, std::less<>>(
+      std::less<>(), make_reserved<VALUE_TYPE>(capacity + 1));
+}
 
+RESPONSE dstree::Answer::push_bsf(VALUE_TYPE distance) {
+  bsf_distances_.push(distance);
+
+  if (bsf_distances_.size() > capacity_) {
+    bsf_distances_.pop();
+  }
+
+  return SUCCESS;
+}
+
+VALUE_TYPE dstree::Answer::pop_bsf() {
+  VALUE_TYPE bsf = bsf_distances_.top();
+  bsf_distances_.pop();
+  return bsf;
 }

@@ -17,6 +17,15 @@
 namespace upcite {
 namespace dstree {
 
+using NODE_DISTNCE = std::tuple<std::shared_ptr<dstree::Node>, VALUE_TYPE>;
+
+class Compare {
+ public:
+  bool operator()(const NODE_DISTNCE &a, const NODE_DISTNCE &b) {
+    return std::get<1>(a) > std::get<1>(b);
+  }
+};
+
 class Index {
  public:
   Index(std::shared_ptr<Config> config, std::shared_ptr<upcite::Logger> logger);
@@ -39,8 +48,8 @@ class Index {
   std::unique_ptr<BufferManager> buffer_manager_;
 
   std::shared_ptr<Node> root_;
-  ID_TYPE nleaf_;
-  std::vector<std::shared_ptr<Node>> leaves_;
+  ID_TYPE nnode_, nleaf_;
+  std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare> leaf_min_heap_;
 };
 
 }

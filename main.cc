@@ -21,5 +21,7 @@ int main(int argc, char *argv[]) {
   index->build();
   index->dump();
 
+  index->search();
+
   return 0;
 }

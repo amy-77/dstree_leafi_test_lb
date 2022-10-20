@@ -22,19 +22,22 @@ find_package(Boost 1.80.0 COMPONENTS program_options log log_setup filesystem sy
 
 include_directories(
         ${Boost_INCLUDE_DIRS}
-        src/exec
         src/util
+        src/common
+        src/exec
 )
 
-add_subdirectory(src/exec)
 add_subdirectory(src/util)
+add_subdirectory(src/common)
+add_subdirectory(src/exec)
 
-add_compile_options(-g)
+add_compile_options(-g -O3)
+#add_compile_options(-O3)
 target_compile_features(${TARGET} PRIVATE cxx_std_14)
 set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "BOOST_LOG_DYN_LINK")
 
 target_link_libraries(${TARGET}
-        PRIVATE exec util ${Boost_LIBRARIES}
+        PRIVATE exec common util ${Boost_LIBRARIES}
         )
 
 install(TARGETS ${TARGET} DESTINATION ${PROJECT_SOURCE_DIR}/bin)

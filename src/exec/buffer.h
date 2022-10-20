@@ -21,9 +21,13 @@ namespace dstree {
 
 class Buffer {
  public:
-  Buffer(ID_TYPE capacity,
+  Buffer(std::shared_ptr<upcite::Logger> logger,
+         bool is_on_disk,
+         ID_TYPE capacity,
+         ID_TYPE series_length,
+         VALUE_TYPE *global_buffer,
          std::string filepath);
-  ~Buffer() = default;
+  ~Buffer();
 
   RESPONSE insert(ID_TYPE offset,
                   const std::shared_ptr<upcite::Logger> &logger);
@@ -34,12 +38,23 @@ class Buffer {
 
   ID_TYPE get_offset(ID_TYPE node_series_id) const { return offsets_[node_series_id]; }
 
+  const VALUE_TYPE *get_next_series_ptr();
+  RESPONSE reset();
+
   bool is_full() const { return capacity_ > 0 && offsets_.size() == capacity_; }
-  ID_TYPE size() const { return static_cast<ID_TYPE>(offsets_.size()); }
+  ID_TYPE size() const { return size_; }
 
  private:
-  ID_TYPE capacity_;
+  std::shared_ptr<upcite::Logger> logger_;
+
+  bool is_on_disk_;
+  ID_TYPE capacity_, size_;
+  ID_TYPE series_length_;
+
   std::vector<ID_TYPE> offsets_;
+  VALUE_TYPE *global_buffer_, *local_buffer_;
+
+  ID_TYPE next_series_id_;
 
   std::string filepath_;
 };

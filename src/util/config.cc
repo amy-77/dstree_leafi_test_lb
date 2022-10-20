@@ -34,7 +34,9 @@ dstree::Config::Config(int argc, char *argv[]) :
     vertical_split_nsubsegment_(2),
     vertical_split_gain_tradeoff_factor_(2),
     is_exact_search_(false),
-    search_max_nseries_(-1) {
+    search_max_nseries_(-1),
+    search_max_nnode_(-1),
+    n_nearest_neighbor_(1) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -72,7 +74,11 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("exact_search", po::bool_switch(&is_exact_search_)->default_value(false),
        "Whether to conduct exact search (or approximate search)")
       ("search_max_nseries", po::value<ID_TYPE>(&search_max_nseries_)->default_value(-1),
-       "Maximal number of series to be checked during query answering ");
+       "Maximal number of series to be checked during query answering")
+      ("search_max_nnode", po::value<ID_TYPE>(&search_max_nnode_)->default_value(-1),
+       "Maximal number of nodes to be checked during query answering")
+      ("n_nearest_neighbor", po::value<ID_TYPE>(&n_nearest_neighbor_)->default_value(1),
+       "Number of nearest neighbors to be returned");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -109,38 +115,81 @@ dstree::Config::Config(int argc, char *argv[]) :
     }
   }
 
+  if (search_max_nseries_ > 0 || search_max_nnode_ > 0) {
+    is_exact_search_ = true;
+  }
 
   if (is_exact_search_) {
     if (search_max_nseries_ < 1) {
       search_max_nseries_ = db_nseries_;
     }
-  } else if (search_max_nseries_ > 0) {
-    is_exact_search_ = true;
+
+    if (search_max_nnode_ < 1) {
+      search_max_nnode_ = db_nseries_;
+    }
   }
 }
 
 void dstree::Config::log(std::shared_ptr<upcite::Logger> &logger) {
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("db_filepath = %s") % db_filepath_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("query_filepath = %s") % query_filepath_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "db_filepath = %s")
+        % db_filepath_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "query_filepath = %s")
+        % query_filepath_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("is_znormalized = %d") % is_znormalized_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "is_znormalized = %d")
+        % is_znormalized_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("db_size = %d") % db_nseries_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("query_size = %d") % query_nseries_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("leaf_size = %d") % leaf_max_nseries_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "db_size = %d")
+        % db_nseries_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "query_size = %d")
+        % query_nseries_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "leaf_size = %d")
+        % leaf_max_nseries_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("batch_load_nseries = %d") % batch_load_nseries_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("default_nbuffer = %d") % default_nbuffer_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "batch_load_nseries = %d")
+        % batch_load_nseries_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "default_nbuffer = %d")
+        % default_nbuffer_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("on_disk = %d") % on_disk_;
-  MALAT_LOG(logger->logger, trivial::info)
-    << boost::format("index_persist_folderpath = %s") % index_persist_folderpath_;
-  MALAT_LOG(logger->logger, trivial::info)
-    << boost::format("index_persist_file_postfix = %s") % index_persist_file_postfix_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "on_disk = %d")
+        % on_disk_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "index_persist_folderpath = %s")
+        % index_persist_folderpath_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "index_persist_file_postfix = %s")
+        % index_persist_file_postfix_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format("node_nchild = %d") % node_nchild_;
-  MALAT_LOG(logger->logger, trivial::info)
-    << boost::format("vertical_split_nsubsegment = %d") % vertical_split_nsubsegment_;
-  MALAT_LOG(logger->logger, trivial::info)
-    << boost::format("vertical_split_gain_tradeoff_factor = %.3f") % vertical_split_gain_tradeoff_factor_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "node_nchild = %d")
+        % node_nchild_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "vertical_split_nsubsegment = %d")
+        % vertical_split_nsubsegment_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "vertical_split_gain_tradeoff_factor = %.3f")
+        % vertical_split_gain_tradeoff_factor_;
+
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "is_exact_search = %d")
+        % is_exact_search_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "search_max_nseries = %d")
+        % search_max_nseries_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "search_max_nnode = %d")
+        % search_max_nnode_;
+
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "n_nearest_neighbor = %d")
+        % n_nearest_neighbor_;
 }

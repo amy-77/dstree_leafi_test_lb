@@ -20,8 +20,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Boost 1.80.0 COMPONENTS program_options log log_setup filesystem system REQUIRED)
 
+list(APPEND CMAKE_MODULE_PATH "$ENV{LIBTORCH_ROOT}/share/cmake/Torch")
+list(APPEND CMAKE_PREFIX_PATH "$ENV{LIBTORCH_ROOT}/share/cmake/Torch")
+
+find_package(Torch REQUIRED)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+
 include_directories(
         ${Boost_INCLUDE_DIRS}
+        ${TORCH_INCLUDE_DIRS}
         src/util
         src/common
         src/exec
@@ -33,11 +41,11 @@ add_subdirectory(src/exec)
 
 add_compile_options(-g -O3)
 #add_compile_options(-O3)
+
 target_compile_features(${TARGET} PRIVATE cxx_std_14)
-set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "BOOST_LOG_DYN_LINK")
 
 target_link_libraries(${TARGET}
-        PRIVATE exec common util ${Boost_LIBRARIES}
+        PRIVATE exec common util
         )
 
 install(TARGETS ${TARGET} DESTINATION ${PROJECT_SOURCE_DIR}/bin)

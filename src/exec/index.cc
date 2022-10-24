@@ -47,6 +47,11 @@ RESPONSE dstree::Index::build() {
   leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare>(
       Compare(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));
 
+  if (config_->require_neurofilter_) {
+    collect_train_set();
+    train_neurofilters();
+  }
+
   return SUCCESS;
 }
 
@@ -71,6 +76,14 @@ RESPONSE dstree::Index::insert(ID_TYPE batch_series_id) {
   }
 
   return target_node->insert(batch_series_id, series_eapca);
+}
+
+RESPONSE dstree::Index::collect_train_set() {
+  return SUCCESS;
+}
+
+RESPONSE dstree::Index::train_neurofilters() {
+  return SUCCESS;
 }
 
 RESPONSE dstree::Index::load() {
@@ -166,15 +179,17 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, const VALUE_TYPE *series_ptr) {
       if (node_to_visit->is_leaf()) {
         if (visited_node_counter < config_->search_max_nnode_
             && visited_series_counter < config_->search_max_nseries_) {
-          if (node_to_visit->get_id() != resident_node_id && answer->is_bsf(node2visit_lbdistance)) {
-            node_to_visit->search(series_ptr, answer, visited_node_counter, visited_series_counter);
+          if (node_to_visit->get_id() != resident_node_id) {
+            if (config_->is_ground_truth_ || answer->is_bsf(node2visit_lbdistance)) {
+              node_to_visit->search(series_ptr, answer, visited_node_counter, visited_series_counter);
+            }
           }
         }
       } else {
         for (const auto &child_node : node_to_visit->children_) {
           VALUE_TYPE child_lower_bound_EDsquare = child_node->cal_lower_bound_EDsquare(series_ptr);
 
-          if (answer->is_bsf(child_lower_bound_EDsquare)) {
+          if (config_->is_ground_truth_ || answer->is_bsf(child_lower_bound_EDsquare)) {
             leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
           }
         }

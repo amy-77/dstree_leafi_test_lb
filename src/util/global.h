@@ -6,11 +6,15 @@
 #ifndef DSTREE_GLOBAL_H
 #define DSTREE_GLOBAL_H
 
+#include <torch/types.h>
+
 #define DEBUG
 #define DEBUGGED
 
-typedef float VALUE_TYPE;
 typedef int64_t ID_TYPE;
+typedef float VALUE_TYPE;
+
+constexpr auto TORCH_VALUE_TYPE = torch::kFloat32;
 
 enum RESPONSE {
   SUCCESS = 0,

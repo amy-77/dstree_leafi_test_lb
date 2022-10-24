@@ -88,3 +88,6 @@ cmake-build-*/
 # MAC OS
 *.DS_store
 *.xcodeproj/
+
+# outputs
+*.log

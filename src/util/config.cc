@@ -28,6 +28,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     leaf_max_nseries_(-1),
     batch_load_nseries_(-1),
     default_nbuffer_(1024 * 64),
+    on_disk_(false),
     index_persist_folderpath_("."),
     index_persist_file_postfix_(".bin"),
     node_nchild_(2),
@@ -36,7 +37,21 @@ dstree::Config::Config(int argc, char *argv[]) :
     is_exact_search_(false),
     search_max_nseries_(-1),
     search_max_nnode_(-1),
-    n_nearest_neighbor_(1) {
+    n_nearest_neighbor_(1),
+    is_ground_truth_(false),
+    require_neurofilter_(false),
+    nf_dim_latent_(-1),
+    nf_train_dropout_p_(0.5),
+    nf_leaky_relu_negative_slope_(0.1),
+    nf_train_is_gpu_(false),
+    nf_device_id_(0),
+    nf_train_nexample_(-1),
+    nf_train_batchsize_(-1),
+    nf_train_nepoch_(100),
+    nf_train_learning_rate_(0.01),
+    nf_train_min_lr_(0.0001),
+    nf_train_clip_grad_norm_type_(2),
+    nf_train_clip_grad_max_norm_(1) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -78,7 +93,35 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("search_max_nnode", po::value<ID_TYPE>(&search_max_nnode_)->default_value(-1),
        "Maximal number of nodes to be checked during query answering")
       ("n_nearest_neighbor", po::value<ID_TYPE>(&n_nearest_neighbor_)->default_value(1),
-       "Number of nearest neighbors to be returned");
+       "Number of nearest neighbors to be returned")
+      ("ground_truth", po::bool_switch(&is_ground_truth_)->default_value(false),
+       "Whether to fetch the ground truths, i.e., linear scan without pruning")
+      ("require_neurofilter", po::bool_switch(&require_neurofilter_)->default_value(false),
+       "Whether to implant neurofilters")
+      ("dim_latent", po::value<ID_TYPE>(&nf_dim_latent_),
+       "Dimension of neural model latent variables")
+      ("dropout_p", po::value<VALUE_TYPE>(&nf_train_dropout_p_)->default_value(0.5),
+       "Dropout probability for MLP latent layer")
+      ("leaky_relu_negative_slope", po::value<VALUE_TYPE>(&nf_leaky_relu_negative_slope_)->default_value(0.1),
+       "Leaky ReLU negative slope for MLP")
+      ("is_gpu", po::bool_switch(&nf_train_is_gpu_)->default_value(false),
+       "Whether to train and run neurofilters on GPU (other on CPU)")
+      ("device_id", po::value<ID_TYPE>(&nf_device_id_)->default_value(0),
+       "GPU device id")
+      ("nf_train_nexample", po::value<ID_TYPE>(&nf_train_nexample_),
+       "Number of train examples for neurofilters")
+      ("nf_train_batchsize", po::value<ID_TYPE>(&nf_train_batchsize_)->default_value(-1),
+       "Neurofilter train batch size")
+      ("nf_train_nepoch", po::value<ID_TYPE>(&nf_train_nepoch_)->default_value(100),
+       "Neurofilter train (maximal) number of epochs")
+      ("learning_rate", po::value<VALUE_TYPE>(&nf_train_learning_rate_)->default_value(0.01),
+       "Neurofilter train learning rate")
+      ("nf_train_min_lr", po::value<VALUE_TYPE>(&nf_train_min_lr_)->default_value(0.0001),
+       "Neurofilter train minimal learning rate, for adjusting learning rates")
+      ("clip_grad_norm_type", po::value<VALUE_TYPE>(&nf_train_clip_grad_norm_type_)->default_value(2),
+       "Gradient clipping norm type")
+      ("clip_grad_max_norm", po::value<VALUE_TYPE>(&nf_train_clip_grad_max_norm_)->default_value(1),
+       "Gradient clipping max norm");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -126,6 +169,22 @@ dstree::Config::Config(int argc, char *argv[]) :
 
     if (search_max_nnode_ < 1) {
       search_max_nnode_ = db_nseries_;
+    }
+  }
+
+  if (require_neurofilter_) {
+    if (nf_dim_latent_ < 0) {
+      nf_dim_latent_ = series_length_;
+    }
+
+    if (nf_train_nexample_ < 0) {
+      std::cout << "Please specify the number of neurofilter train examples by setting --neurofilter_train_nexample"
+                << std::endl;
+      exit(-1);
+    }
+
+    if (nf_train_batchsize_ < 0) {
+      nf_train_batchsize_ = nf_train_nexample_;
     }
   }
 }
@@ -192,4 +251,8 @@ void dstree::Config::log(std::shared_ptr<upcite::Logger> &logger) {
   MALAT_LOG(logger->logger, trivial::info) << boost::format(
         "n_nearest_neighbor = %d")
         % n_nearest_neighbor_;
+
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "is_ground_truth = %d")
+        % is_ground_truth_;
 }

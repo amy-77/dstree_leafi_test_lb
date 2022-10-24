@@ -42,6 +42,9 @@ class Index {
  private:
   RESPONSE insert(ID_TYPE batch_series_id);
 
+  RESPONSE collect_train_set();
+  RESPONSE train_neurofilters();
+
   std::shared_ptr<Config> config_;
   std::shared_ptr<upcite::Logger> logger_;
 

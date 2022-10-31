@@ -103,10 +103,12 @@ RESPONSE dstree::Filter::train() {
 #endif
 
 #ifdef DEBUG
-  MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
-        "train %d node distances = %s")
-        % id_
-        % upcite::get_str(node_lower_bound_distances_.data(), train_size_);
+  if (!node_lower_bound_distances_.empty()) {
+    MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
+          "train %d node distances = %s")
+          % id_
+          % upcite::get_str(node_lower_bound_distances_.data(), train_size_);
+  }
 
   MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
         "train %d bsf distances = %s")
@@ -178,7 +180,7 @@ RESPONSE dstree::Filter::train() {
     MALAT_LOG(logger_->logger, trivial::info) << boost::format(
           "train %d losses = %s")
           % id_
-          % upcite::get_str(global_losses.data(), num_train_examples);
+          % upcite::get_str(global_losses.data(), config_->nf_train_nepoch_);
 #endif
     optimizer.zero_grad();
     for (const auto &parameter : model_->parameters()) {

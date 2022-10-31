@@ -68,6 +68,8 @@ class Config : std::enable_shared_from_this<Config> {
   VALUE_TYPE nf_train_min_lr_;
   VALUE_TYPE nf_train_clip_grad_norm_type_;
   VALUE_TYPE nf_train_clip_grad_max_norm_;
+
+  std::string nf_query_filepath_;
 };
 
 }

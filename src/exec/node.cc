@@ -26,7 +26,8 @@ dstree::Node::Node(std::shared_ptr<dstree::Config> config,
     logger_(std::move(logger)),
     depth_(depth),
     id_(id),
-    nseries_(0) {
+    nseries_(0),
+    neurofilter_(nullptr) {
   buffer_ = buffer_manager->create_node_buffer(id_);
 
   split_ = std::make_shared<dstree::Split>();
@@ -626,6 +627,25 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
   visited_node_counter += 1;
 
   return SUCCESS;
+}
+
+VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr) const {
+  const VALUE_TYPE *db_series_ptr = buffer_->get_next_series_ptr();
+  VALUE_TYPE local_bsf = constant::MAX_VALUE;
+
+  while (db_series_ptr != nullptr) {
+    VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_->series_length_);
+
+    if (distance < local_bsf) {
+      local_bsf = distance;
+    }
+
+    db_series_ptr = buffer_->get_next_series_ptr();
+  }
+
+  buffer_->reset();
+
+  return local_bsf;
 }
 
 RESPONSE dstree::Node::log() {

@@ -9,10 +9,13 @@
 #include <memory>
 #include <vector>
 
+#include <torch/torch.h>
+
 #include "global.h"
 #include "config.h"
 #include "buffer.h"
 #include "node.h"
+#include "filter.h"
 
 namespace upcite {
 namespace dstree {
@@ -29,21 +32,24 @@ class Compare {
 class Index {
  public:
   Index(std::shared_ptr<Config> config, std::shared_ptr<upcite::Logger> logger);
-  ~Index() = default;
+  ~Index();
 
   RESPONSE build();
+  RESPONSE train();
 
   RESPONSE load();
   RESPONSE dump();
 
   RESPONSE search();
-  RESPONSE search(ID_TYPE query_id, const VALUE_TYPE *series_ptr);
+  RESPONSE search(ID_TYPE query_id, VALUE_TYPE *series_ptr);
 
  private:
   RESPONSE insert(ID_TYPE batch_series_id);
 
-  RESPONSE collect_train_set();
-  RESPONSE train_neurofilters();
+  RESPONSE nf_initialize(std::shared_ptr<dstree::Node> &node,
+                         ID_TYPE *filter_id);
+  RESPONSE nf_collect();
+  RESPONSE nf_train();
 
   std::shared_ptr<Config> config_;
   std::shared_ptr<upcite::Logger> logger_;
@@ -53,6 +59,12 @@ class Index {
   std::shared_ptr<Node> root_;
   ID_TYPE nnode_, nleaf_;
   std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare> leaf_min_heap_;
+
+  VALUE_TYPE *nf_train_query_ptr_;
+  torch::Tensor nf_train_query_tsr_;
+  torch::Tensor nf_query_tsr_;
+  std::unique_ptr<torch::Device> device_;
+  std::vector<std::reference_wrapper<Filter>> filter_cache_;
 };
 
 }

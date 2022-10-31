@@ -15,6 +15,7 @@
 #include "eapca.h"
 #include "split.h"
 #include "answer.h"
+#include "filter.h"
 
 namespace upcite {
 namespace dstree {
@@ -47,6 +48,8 @@ class Node : std::enable_shared_from_this<Node> {
                   ID_TYPE &visited_node_counter,
                   ID_TYPE &visited_series_counter) const;
 
+  VALUE_TYPE search(const VALUE_TYPE *query_series_ptr) const;
+
   VALUE_TYPE cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr) const {
     return eapca_envelope_->cal_lower_bound_EDsquare(series_ptr, logger_);
   }
@@ -61,6 +64,9 @@ class Node : std::enable_shared_from_this<Node> {
 
   // TODO make private
   std::vector<std::shared_ptr<Node>> children_;
+
+  // TODO make private
+  std::unique_ptr<Filter> neurofilter_;
 
  private:
   ID_TYPE depth_, id_;

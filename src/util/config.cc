@@ -44,6 +44,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     nf_train_dropout_p_(0.5),
     nf_leaky_relu_negative_slope_(0.1),
     nf_train_is_gpu_(false),
+    nf_infer_is_gpu_(false),
     nf_device_id_(0),
     nf_train_nexample_(-1),
     nf_train_batchsize_(-1),
@@ -104,8 +105,10 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Dropout probability for MLP latent layer")
       ("leaky_relu_negative_slope", po::value<VALUE_TYPE>(&nf_leaky_relu_negative_slope_)->default_value(0.1),
        "Leaky ReLU negative slope for MLP")
-      ("is_gpu", po::bool_switch(&nf_train_is_gpu_)->default_value(false),
-       "Whether to train and run neurofilters on GPU (other on CPU)")
+      ("nf_train_is_gpu", po::bool_switch(&nf_train_is_gpu_)->default_value(false),
+       "Whether to train neurofilters on GPU (other on CPU)")
+      ("nf_infer_is_gpu", po::bool_switch(&nf_infer_is_gpu_)->default_value(false),
+       "Whether to run neurofilters on GPU (other on CPU)")
       ("device_id", po::value<ID_TYPE>(&nf_device_id_)->default_value(0),
        "GPU device id")
       ("nf_train_nexample", po::value<ID_TYPE>(&nf_train_nexample_),
@@ -121,7 +124,9 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("clip_grad_norm_type", po::value<VALUE_TYPE>(&nf_train_clip_grad_norm_type_)->default_value(2),
        "Gradient clipping norm type")
       ("clip_grad_max_norm", po::value<VALUE_TYPE>(&nf_train_clip_grad_max_norm_)->default_value(1),
-       "Gradient clipping max norm");
+       "Gradient clipping max norm")
+      ("nf_query_filepath", po::value<std::string>(&nf_query_filepath_),
+       "Query file path to train neurofilters");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -185,6 +190,14 @@ dstree::Config::Config(int argc, char *argv[]) :
 
     if (nf_train_batchsize_ < 0) {
       nf_train_batchsize_ = nf_train_nexample_;
+    }
+
+    if (vm.count("nf_infer_is_gpu") < 1) {
+      nf_infer_is_gpu_ = nf_train_is_gpu_;
+    }
+
+    if (vm.count("dim_latent") < 1) {
+      nf_dim_latent_ = series_length_;
     }
   }
 }
@@ -255,4 +268,52 @@ void dstree::Config::log(std::shared_ptr<upcite::Logger> &logger) {
   MALAT_LOG(logger->logger, trivial::info) << boost::format(
         "is_ground_truth = %d")
         % is_ground_truth_;
+
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "require_neurofilter = %d")
+        % require_neurofilter_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_dim_latent = %d")
+        % nf_dim_latent_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_leaky_relu_negative_slope = %.3f")
+        % nf_leaky_relu_negative_slope_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_dropout_p = %.3f")
+        % nf_train_dropout_p_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_is_gpu = %d")
+        % nf_train_is_gpu_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_infer_is_gpu = %d")
+        % nf_infer_is_gpu_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_device_id = %d")
+        % nf_device_id_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_nexample = %d")
+        % nf_train_nexample_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_batchsize = %d")
+        % nf_train_batchsize_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_nepoch = %d")
+        % nf_train_nepoch_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_learning_rate = %.3f")
+        % nf_train_learning_rate_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_min_lr = %.3f")
+        % nf_train_min_lr_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_clip_grad_norm_type = %.3f")
+        % nf_train_clip_grad_norm_type_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_clip_grad_max_norm = %.3f")
+        % nf_train_clip_grad_max_norm_;
+
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_query_filepath = %s")
+        % nf_query_filepath_;
+
 }

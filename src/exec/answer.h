@@ -28,6 +28,8 @@ class Answer {
   }
 
   RESPONSE push_bsf(VALUE_TYPE distance);
+  RESPONSE check_push_bsf(VALUE_TYPE distance);
+
   VALUE_TYPE get_bsf() const { return bsf_distances_.top(); };
   VALUE_TYPE pop_bsf();
 

@@ -26,6 +26,14 @@ RESPONSE dstree::Answer::push_bsf(VALUE_TYPE distance) {
   return SUCCESS;
 }
 
+RESPONSE dstree::Answer::check_push_bsf(VALUE_TYPE distance) {
+  if (is_bsf(distance)) {
+    push_bsf(distance);
+  }
+
+  return SUCCESS;
+}
+
 VALUE_TYPE dstree::Answer::pop_bsf() {
   VALUE_TYPE bsf = bsf_distances_.top();
   bsf_distances_.pop();

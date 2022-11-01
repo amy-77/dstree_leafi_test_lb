@@ -33,6 +33,16 @@ class Answer {
   VALUE_TYPE get_bsf() const { return bsf_distances_.top(); };
   VALUE_TYPE pop_bsf();
 
+  RESPONSE reset(ID_TYPE query_id) {
+    query_id_ = query_id;
+
+    while (!bsf_distances_.empty()) {
+      bsf_distances_.pop();
+    }
+
+    return SUCCESS;
+  }
+
   bool empty() const { return bsf_distances_.empty(); }
 
   ID_TYPE query_id_;

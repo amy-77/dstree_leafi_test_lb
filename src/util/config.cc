@@ -25,7 +25,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     query_nseries_(-1),
     series_length_(-1),
     is_znormalized_(true),
-    leaf_max_nseries_(-1),
+    leaf_max_nseries_(10000),
     batch_load_nseries_(-1),
     default_nbuffer_(1024 * 64),
     on_disk_(false),
@@ -52,7 +52,10 @@ dstree::Config::Config(int argc, char *argv[]) :
     nf_train_learning_rate_(0.01),
     nf_train_min_lr_(0.0001),
     nf_train_clip_grad_norm_type_(2),
-    nf_train_clip_grad_max_norm_(1) {
+    nf_train_clip_grad_max_norm_(1),
+    nf_train_is_mthread_(false),
+    nf_collect_nthread_(-1),
+    nf_train_nthread_(4) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -71,7 +74,7 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Number of series in database")
       ("query_size", po::value<ID_TYPE>(&query_nseries_)->required(),
        "Number of query series")
-      ("leaf_size", po::value<ID_TYPE>(&leaf_max_nseries_)->required(),
+      ("leaf_size", po::value<ID_TYPE>(&leaf_max_nseries_)->default_value(10000),
        "Maximal leaf node size")
       ("batch_load_size", po::value<ID_TYPE>(&batch_load_nseries_),
        "Maximal number of series for batch loading")
@@ -126,7 +129,13 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("clip_grad_max_norm", po::value<VALUE_TYPE>(&nf_train_clip_grad_max_norm_)->default_value(1),
        "Gradient clipping max norm")
       ("nf_query_filepath", po::value<std::string>(&nf_query_filepath_),
-       "Query file path to train neurofilters");
+       "Query file path to train neurofilters")
+      ("nf_train_mthread", po::bool_switch(&nf_train_is_mthread_)->default_value(false),
+       "Whether to train neurofilters multithreadingly")
+      ("nf_collect_nthread", po::value<ID_TYPE>(&nf_collect_nthread_)->default_value(-1),
+       "Number of threads to collect neurofilter train set; default nf_train_nthread")
+      ("nf_train_nthread", po::value<ID_TYPE>(&nf_train_nthread_)->default_value(4),
+       "Number of threads to train neurofilters");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -198,6 +207,12 @@ dstree::Config::Config(int argc, char *argv[]) :
 
     if (vm.count("dim_latent") < 1) {
       nf_dim_latent_ = series_length_;
+    }
+
+    if (nf_train_is_mthread_) {
+      if (nf_collect_nthread_ < 0) {
+        nf_collect_nthread_ = nf_train_nthread_;
+      }
     }
   }
 }
@@ -316,4 +331,13 @@ void dstree::Config::log(std::shared_ptr<upcite::Logger> &logger) {
         "nf_query_filepath = %s")
         % nf_query_filepath_;
 
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_mthread = %d")
+        % nf_train_is_mthread_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_collect_nthread = %d")
+        % nf_collect_nthread_;
+  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+        "nf_train_nthread = %d")
+        % nf_train_nthread_;
 }

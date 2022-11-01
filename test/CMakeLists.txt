@@ -12,3 +12,13 @@ target_compile_features(${TEST_SHARED_FROM_THIS} PRIVATE cxx_std_14)
 target_link_libraries(${TEST_SHARED_FROM_THIS} PRIVATE exec util)
 
 install(TARGETS ${TARGET_SHARED_FROM_THIS} DESTINATION ${CMAKE_SOURCE_DIR}/bin)
+
+set(TEST_SIMD test_simd)
+
+add_executable(${TEST_SIMD} test_simd.cc)
+set_property(TARGET ${TEST_SIMD} PROPERTY CXX_STANDARD 14)
+
+target_compile_features(${TEST_SIMD} PRIVATE cxx_std_14)
+target_link_libraries(${TEST_SIMD} PRIVATE common util ${Boost_LIBRARIES})
+
+install(TARGETS ${TEST_SIMD} DESTINATION ${CMAKE_SOURCE_DIR}/bin)

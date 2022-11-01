@@ -5,6 +5,7 @@
 
 #include "buffer.h"
 
+#include <immintrin.h>
 #include <iostream>
 #include <utility>
 
@@ -44,7 +45,7 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
   if (is_on_disk_) {
     if (local_buffer_ == nullptr) {
       ID_TYPE local_buffer_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * series_length_ * size_;
-      local_buffer_ = static_cast<VALUE_TYPE *>(std::malloc(local_buffer_nbytes));
+      local_buffer_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), local_buffer_nbytes));
 
       if (!fs::exists(filepath_)) {
         MALAT_LOG(logger_->logger, trivial::error) << boost::format(
@@ -166,7 +167,7 @@ dstree::BufferManager::BufferManager(std::shared_ptr<dstree::Config> config, std
     batch_flush_buffer_(nullptr) {
   batch_nseries_ = config_->batch_load_nseries_;
   auto batch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_->series_length_ * batch_nseries_;
-  batch_load_buffer_ = static_cast<VALUE_TYPE *>(std::malloc(batch_nbytes));
+  batch_load_buffer_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), batch_nbytes));
 
   node_buffers_.reserve(config_->default_nbuffer_);
 

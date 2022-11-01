@@ -215,10 +215,12 @@ RESPONSE dstree::Filter::train() {
         memory_size += buffer.nbytes();
       }
 
-      MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-            "neurofiler %d size = %.3fMB")
-            % id_
-            % (static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024));
+      if (id_ == 0) {
+        MALAT_LOG(logger_->logger, trivial::info) << boost::format(
+              "neurofilter %d size = %.3fMB")
+              % id_
+              % (static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024));
+      }
     }
 #endif
   }

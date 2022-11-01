@@ -8,7 +8,8 @@ add_library(${TARGET} SHARED index.cc node.cc filter.cc model.h buffer.cc eapca.
 
 set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_features(${TARGET} PRIVATE cxx_std_14)
+target_compile_options(${TARGET} PUBLIC -march=native -msse3 -msse4.2 -mavx -mavx2)
 
 target_link_libraries(${TARGET}
-        PRIVATE common util ${Boost_LIBRARIES} ${TORCH_LIBRARIES}
+        PRIVATE common util ${Boost_LIBRARIES} ${TORCH_LIBRARIES} pthread
         )

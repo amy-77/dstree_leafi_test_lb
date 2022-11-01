@@ -49,6 +49,7 @@ class Index {
   RESPONSE nf_initialize(std::shared_ptr<dstree::Node> &node,
                          ID_TYPE *filter_id);
   RESPONSE nf_collect();
+  RESPONSE nf_collect_mthread();
   RESPONSE nf_train();
 
   std::shared_ptr<Config> config_;

@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <vector>
+#include <stack>
 
 #include <torch/torch.h>
 
@@ -51,6 +52,7 @@ class Index {
   RESPONSE nf_collect();
   RESPONSE nf_collect_mthread();
   RESPONSE nf_train();
+  RESPONSE nf_train_mthread();
 
   std::shared_ptr<Config> config_;
   std::shared_ptr<upcite::Logger> logger_;
@@ -65,7 +67,7 @@ class Index {
   torch::Tensor nf_train_query_tsr_;
   torch::Tensor nf_query_tsr_;
   std::unique_ptr<torch::Device> device_;
-  std::vector<std::reference_wrapper<Filter>> filter_cache_;
+  std::stack<std::reference_wrapper<Filter>> filter_cache_;
 };
 
 }

@@ -1,4 +1,5 @@
 # dstree
 
 # TODO list
-1. [ ] enable compiling on macOS
+- [ ] enable compiling on macOS
+- [ ] clear shared_ptr abuse

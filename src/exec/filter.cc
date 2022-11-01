@@ -102,21 +102,29 @@ RESPONSE dstree::Filter::train() {
 //#endif
 #endif
 
+  ID_TYPE stream_id = -1;
+  if (config_->nf_train_is_gpu_) {
+    stream_id = at::cuda::getCurrentCUDAStream(config_->nf_device_id_).id();
+  }
+
 #ifdef DEBUG
   if (!node_lower_bound_distances_.empty()) {
     MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
-          "train %d node distances = %s")
+          "stream %d filter %d node distances = %s")
+          % stream_id
           % id_
           % upcite::get_str(node_lower_bound_distances_.data(), train_size_);
   }
 
   MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
-        "train %d bsf distances = %s")
+        "stream %d filter %d bsf distances = %s")
+        % stream_id
         % id_
         % upcite::get_str(bsf_distances_.data(), train_size_);
 
   MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
-        "train %d nn distances = %s")
+        "stream %d filter %d nn distances = %s")
+        % stream_id
         % id_
         % upcite::get_str(nn_distances_.data(), train_size_);
 
@@ -125,108 +133,102 @@ RESPONSE dstree::Filter::train() {
   ID_TYPE num_train_examples = train_size_ / 6 * 5;
 //    int num_valid_examples = train_size_ - num_train_examples;
 
-  {
-    at::cuda::CUDAStream local_stream = at::cuda::getStreamFromPool(false, config_->nf_device_id_);
-    at::cuda::setCurrentCUDAStream(local_stream);
+  auto dataset = SeriesDataset(shared_train_queries_, nn_distances_, num_train_examples, *device_);
+  auto data_loader = torch::data::make_data_loader<torch::data::samplers::RandomSampler>(
+      dataset.map(torch::data::transforms::Stack<>()), config_->nf_train_batchsize_);
 
-    at::cuda::CUDAStreamGuard guard(local_stream); // compiles with cuda
-
-    auto dataset = SeriesDataset(shared_train_queries_, nn_distances_, num_train_examples, *device_);
-    auto data_loader = torch::data::make_data_loader<torch::data::samplers::RandomSampler>(
-        dataset.map(torch::data::transforms::Stack<>()), config_->nf_train_batchsize_);
-
-    torch::optim::SGD optimizer(model_->parameters(), config_->nf_train_learning_rate_);
+  torch::optim::SGD optimizer(model_->parameters(), config_->nf_train_learning_rate_);
 
 #ifdef DEBUG
-    std::vector<float> global_losses, local_losses;
-    global_losses.reserve(config_->nf_train_nepoch_);
-    local_losses.reserve(num_train_examples / config_->nf_train_batchsize_ + 1);
+  std::vector<float> global_losses, local_losses;
+  global_losses.reserve(config_->nf_train_nepoch_);
+  local_losses.reserve(num_train_examples / config_->nf_train_batchsize_ + 1);
 #endif
 
-    for (size_t epoch = 0; epoch < config_->nf_train_nepoch_; ++epoch) {
-      adjust_learning_rate(optimizer,
-                           config_->nf_train_learning_rate_,
-                           config_->nf_train_min_lr_,
-                           epoch,
-                           config_->nf_train_nepoch_);
+  for (size_t epoch = 0; epoch < config_->nf_train_nepoch_; ++epoch) {
+    adjust_learning_rate(optimizer,
+                         config_->nf_train_learning_rate_,
+                         config_->nf_train_min_lr_,
+                         epoch,
+                         config_->nf_train_nepoch_);
 
-      for (auto &batch : *data_loader) {
-        auto batch_data = batch.data, batch_target = batch.target;
+    for (auto &batch : *data_loader) {
+      auto batch_data = batch.data, batch_target = batch.target;
 
-        optimizer.zero_grad();
+      optimizer.zero_grad();
 
-        torch::Tensor prediction = model_->forward(batch_data);
-        torch::Tensor loss = torch::mse_loss(prediction, batch_target);
+      torch::Tensor prediction = model_->forward(batch_data);
+      torch::Tensor loss = torch::mse_loss(prediction, batch_target);
 
-        loss.backward();
-        auto norm = torch::nn::utils::clip_grad_norm_(model_->parameters(),
-                                                      config_->nf_train_clip_grad_max_norm_,
-                                                      config_->nf_train_clip_grad_norm_type_);
-        optimizer.step();
-
-#ifdef DEBUG
-        local_losses.emplace_back(loss.detach().item<float>());
-#endif
-      }
+      loss.backward();
+      auto norm = torch::nn::utils::clip_grad_norm_(model_->parameters(),
+                                                    config_->nf_train_clip_grad_max_norm_,
+                                                    config_->nf_train_clip_grad_norm_type_);
+      optimizer.step();
 
 #ifdef DEBUG
-      global_losses.emplace_back(std::accumulate(local_losses.begin(), local_losses.end(), 0.0)
-                                     / (float) local_losses.size());
-      local_losses.clear();
+      local_losses.emplace_back(loss.detach().item<float>());
 #endif
     }
 
 #ifdef DEBUG
-    MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-          "train %d losses = %s")
-          % id_
-          % upcite::get_str(global_losses.data(), config_->nf_train_nepoch_);
-#endif
-    optimizer.zero_grad();
-    for (const auto &parameter : model_->parameters()) {
-      parameter.requires_grad_(false);
-    }
-
-//    net->to(torch::Device(torch::kCPU));
-    model_->eval();
-
-#ifdef DEBUG
-    {
-      torch::NoGradGuard no_grad;
-
-      auto predictions = model_->forward(shared_train_queries_).detach().to(torch::Device(torch::kCPU));
-
-      MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-            "train %d predictions = %s")
-            % id_
-            % upcite::get_str(predictions.accessor<VALUE_TYPE, 1>().data(), train_size_);
-    };
-#endif
-
-#ifdef DEBUG
-    if (torch::cuda::is_available()) {
-      size_t memory_size = 0;
-
-      for (const auto &parameter : model_->parameters()) {
-        memory_size += parameter.nbytes();
-      }
-
-      for (const auto &buffer : model_->buffers()) {
-        memory_size += buffer.nbytes();
-      }
-
-      if (id_ == 0) {
-        MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-              "neurofilter %d size = %.3fMB")
-              % id_
-              % (static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024));
-      }
-    }
+    global_losses.emplace_back(std::accumulate(local_losses.begin(), local_losses.end(), 0.0)
+                                   / (float) local_losses.size());
+    local_losses.clear();
 #endif
   }
 
-  c10::cuda::CUDACachingAllocator::emptyCache();
+#ifdef DEBUG
+  MALAT_LOG(logger_->logger, trivial::info) << boost::format(
+        "stream %d filter %d losses = %s")
+        % stream_id
+        % id_
+        % upcite::get_str(global_losses.data(), config_->nf_train_nepoch_);
+#endif
+  optimizer.zero_grad();
+  for (const auto &parameter : model_->parameters()) {
+    parameter.requires_grad_(false);
+  }
 
+//    net->to(torch::Device(torch::kCPU));
+  model_->eval();
+
+#ifdef DEBUG
+  {
+    torch::NoGradGuard no_grad;
+
+    auto predictions = model_->forward(shared_train_queries_).detach().to(torch::Device(torch::kCPU));
+
+    MALAT_LOG(logger_->logger, trivial::info) << boost::format(
+          "stream %d filter %d predictions = %s")
+          % stream_id
+          % id_
+          % upcite::get_str(predictions.accessor<VALUE_TYPE, 1>().data(), train_size_);
+  };
+#endif
+
+#ifdef DEBUG
+  if (torch::cuda::is_available()) {
+    size_t memory_size = 0;
+
+    for (const auto &parameter : model_->parameters()) {
+      memory_size += parameter.nbytes();
+    }
+
+    for (const auto &buffer : model_->buffers()) {
+      memory_size += buffer.nbytes();
+    }
+
+    if (id_ == 0) {
+      MALAT_LOG(logger_->logger, trivial::info) << boost::format(
+            "filter %d size = %.3fMB")
+            % id_
+            % (static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024));
+    }
+  }
+#endif
+
+  c10::cuda::CUDACachingAllocator::emptyCache();
   is_trained_ = true;
 
   return SUCCESS;

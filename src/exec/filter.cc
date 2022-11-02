@@ -14,7 +14,6 @@
 #include "str.h"
 
 namespace dstree = upcite::dstree;
-namespace constant = upcite::constant;
 
 class TORCH_API SeriesDataset : public torch::data::datasets::Dataset<SeriesDataset> {
  public:

@@ -33,7 +33,7 @@ class Logger {
   explicit Logger(std::string log_filepath);
   ~Logger();
 
-  std::unique_ptr<src::severity_logger<logging::trivial::severity_level> > logger;
+  std::unique_ptr<src::severity_logger_mt<logging::trivial::severity_level> > logger;
 
  private:
   boost::shared_ptr<sinks::synchronous_sink<sinks::text_ostream_backend>> sink_;

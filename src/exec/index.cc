@@ -129,11 +129,11 @@ RESPONSE dstree::Index::nf_collect() {
 
     if (answer->is_bsf(local_nn_distance)) {
       MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-            "nf query %d update bsf %f after node %d series %s")
-            % query_id
-            % local_nn_distance
-            % visited_node_counter
-            % visited_series_counter;
+          "nf query %d update bsf %f after node %d series %s")
+          % query_id
+          % local_nn_distance
+          % visited_node_counter
+          % visited_series_counter;
 
       answer->push_bsf(local_nn_distance);
     }
@@ -158,11 +158,11 @@ RESPONSE dstree::Index::nf_collect() {
 
           if (answer->is_bsf(local_nn_distance)) {
             MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-                  "nf query %d update bsf %f after node %d series %s")
-                  % query_id
-                  % local_nn_distance
-                  % visited_node_counter
-                  % visited_series_counter;
+                "nf query %d update bsf %f after node %d series %s")
+                % query_id
+                % local_nn_distance
+                % visited_node_counter
+                % visited_series_counter;
 
             answer->push_bsf(local_nn_distance);
           }
@@ -193,47 +193,48 @@ RESPONSE dstree::Index::nf_collect() {
 
 struct SearchCache {
   SearchCache(ID_TYPE thread_id,
-              upcite::Logger &logger,
-              dstree::Config &config,
-              dstree::Answer &answer,
+//              upcite::Logger &logger,
+//              dstree::Config &config,
+              VALUE_TYPE *m256_fetch_cache,
+              dstree::Answer *answer,
               pthread_rwlock_t *answer_lock,
-              std::priority_queue<dstree::NODE_DISTNCE,
-                                  std::vector<dstree::NODE_DISTNCE>,
-                                  dstree::Compare> &leaf_min_heap,
+              std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE,
+                                                         std::vector<dstree::NODE_DISTNCE>,
+                                                         dstree::Compare>> leaf_min_heap,
               pthread_rwlock_t *leaf_pq_lock,
               ID_TYPE *visited_node_counter,
               ID_TYPE *visited_series_counter,
               pthread_mutex_t *log_mutex) :
       thread_id_(thread_id),
-      logger_(logger),
-      config_(config),
+//      logger_(logger),
+//      config_(config),
       query_id_(-1),
       query_series_ptr_(nullptr),
+      m256_fetch_cache_(m256_fetch_cache),
       answer_(answer),
       answer_lock_(answer_lock),
       leaf_min_heap_(leaf_min_heap),
       leaf_pq_lock_(leaf_pq_lock),
       visited_node_counter_(visited_node_counter),
-      visited_series_counter_(visited_node_counter),
-      log_mutex_(log_mutex),
-      m256_fetch_cache_(std::unique_ptr<VALUE_TYPE>(static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), 8)))) {}
-  ~SearchCache() = default;
+      visited_series_counter_(visited_series_counter),
+      log_mutex_(log_mutex) {}
 
   ID_TYPE thread_id_;
 
-  upcite::Logger &logger_;
-  dstree::Config &config_;
+//  upcite::Logger &logger_;
+//  dstree::Config &config_;
 
   ID_TYPE query_id_;
   VALUE_TYPE *query_series_ptr_;
 
-  dstree::Answer &answer_;
+  VALUE_TYPE *m256_fetch_cache_;
+
+  dstree::Answer *answer_;
   pthread_rwlock_t *answer_lock_;
 
-  std::priority_queue<dstree::NODE_DISTNCE, std::vector<dstree::NODE_DISTNCE>, dstree::Compare> &leaf_min_heap_;
+  std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE, std::vector<dstree::NODE_DISTNCE>, dstree::Compare>>
+      leaf_min_heap_;
   pthread_rwlock_t *leaf_pq_lock_;
-
-  std::unique_ptr<VALUE_TYPE> m256_fetch_cache_;
 
   ID_TYPE *visited_node_counter_;
   ID_TYPE *visited_series_counter_;
@@ -241,33 +242,40 @@ struct SearchCache {
   pthread_mutex_t *log_mutex_;
 };
 
-void search_thread_F(SearchCache &search_cache) {
+void search_thread_F(const SearchCache &search_cache) {
+  // aligned_alloc within thread might cause a "corrupted size vs. prev_size" glibc error
+  // https://stackoverflow.com/questions/49628615/understanding-corrupted-size-vs-prev-size-glibc-error
+//  auto m256_fetch_cache = std::unique_ptr<VALUE_TYPE>(static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), 8)));
+
   std::shared_ptr<dstree::Node> node_to_visit;
   VALUE_TYPE node2visit_lbdistance;
-
-  VALUE_TYPE local_bsf = search_cache.answer_.get_bsf();
   VALUE_TYPE local_nn_distance;
+
+  pthread_rwlock_wrlock(search_cache.answer_lock_);
+  VALUE_TYPE local_bsf = search_cache.answer_->get_bsf();
+  pthread_rwlock_unlock(search_cache.answer_lock_);
 
   while (true) {
     pthread_rwlock_wrlock(search_cache.leaf_pq_lock_);
-    if (search_cache.leaf_min_heap_.empty()) {
+    if (search_cache.leaf_min_heap_.get().empty()) {
       pthread_rwlock_unlock(search_cache.leaf_pq_lock_);
 
       break;
     } else {
-      std::tie(node_to_visit, node2visit_lbdistance) = search_cache.leaf_min_heap_.top();
-      search_cache.leaf_min_heap_.pop();
+      std::tie(node_to_visit, node2visit_lbdistance) = search_cache.leaf_min_heap_.get().top();
+      search_cache.leaf_min_heap_.get().pop();
 
       pthread_rwlock_unlock(search_cache.leaf_pq_lock_);
     }
 
     if (node_to_visit->neurofilter_ == nullptr) {
       local_nn_distance = node_to_visit->search(
-          search_cache.query_series_ptr_, search_cache.m256_fetch_cache_.get(), local_bsf);
+          search_cache.query_series_ptr_, search_cache.m256_fetch_cache_, local_bsf);
     } else {
       local_nn_distance = node_to_visit->search(
-          search_cache.query_series_ptr_, search_cache.m256_fetch_cache_.get());
-      node_to_visit->neurofilter_->push_example(search_cache.answer_.get_bsf(), local_nn_distance);
+          search_cache.query_series_ptr_, search_cache.m256_fetch_cache_);
+
+      node_to_visit->neurofilter_->push_example(local_bsf, local_nn_distance);
     }
 
     pthread_mutex_lock(search_cache.log_mutex_);
@@ -277,47 +285,59 @@ void search_thread_F(SearchCache &search_cache) {
 
     if (local_nn_distance < local_bsf) {
       pthread_rwlock_wrlock(search_cache.answer_lock_);
-      search_cache.answer_.push_bsf(local_nn_distance);
+      search_cache.answer_->push_bsf(local_nn_distance);
+
+      local_bsf = search_cache.answer_->get_bsf();
       pthread_rwlock_unlock(search_cache.answer_lock_);
 
-      local_bsf = search_cache.answer_.get_bsf();
+#ifdef DEBUG
+#ifndef DEBUGGED
+      pthread_mutex_lock(search_cache.log_mutex_);
 
+      // boost::format is not thread safe
+      // https://stackoverflow.com/questions/51566505/boostformat-appears-to-not-be-thread-safe-because-stdctypecharnarrow
       MALAT_LOG(search_cache.logger_.logger, trivial::info) << boost::format(
-            "nf query %d thread %d update bsf %f after node %d series %s")
+            "nf query %d thread %d update bsf %f after node %d series %d")
             % search_cache.query_id_
             % search_cache.thread_id_
             % local_nn_distance
             % *search_cache.visited_node_counter_
             % *search_cache.visited_series_counter_;
+
+      pthread_mutex_unlock(search_cache.log_mutex_);
+#endif
+#endif
     }
   }
 }
 
 RESPONSE dstree::Index::nf_collect_mthread() {
-  auto m256_fetch_cache = std::unique_ptr<VALUE_TYPE>(static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), 8)));
+  auto *m256_fetch_cache = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), 8 * config_->nf_collect_nthread_));
 
   ID_TYPE visited_node_counter = 0;
   ID_TYPE visited_series_counter = 0;
 
-  auto answer = std::make_shared<dstree::Answer>(config_->n_nearest_neighbor_, -1);
+  auto answer = std::make_unique<dstree::Answer>(config_->n_nearest_neighbor_, -1);
 
   std::unique_ptr<pthread_rwlock_t> answer_lock = std::make_unique<pthread_rwlock_t>();
   std::unique_ptr<pthread_rwlock_t> leaf_pq_lock = std::make_unique<pthread_rwlock_t>();
   std::unique_ptr<pthread_mutex_t> log_mutex = std::make_unique<pthread_mutex_t>();
 
-  std::vector<std::unique_ptr<SearchCache>> search_caches;
+  std::vector<SearchCache> search_caches;
+  std::stack<std::shared_ptr<dstree::Node>> node_stack;
 
   for (ID_TYPE thread_id = 0; thread_id < config_->nf_collect_nthread_; ++thread_id) {
-    search_caches.push_back(std::make_unique<SearchCache>(thread_id,
-                                                          std::ref(*logger_),
-                                                          std::ref(*config_),
-                                                          std::ref(*answer),
-                                                          answer_lock.get(),
-                                                          std::ref(leaf_min_heap_),
-                                                          leaf_pq_lock.get(),
-                                                          &visited_node_counter,
-                                                          &visited_series_counter,
-                                                          log_mutex.get()));
+    search_caches.emplace_back(thread_id,
+//                               std::ref(*logger_),
+//                               std::ref(*config_),
+                               m256_fetch_cache + 8 * thread_id,
+                               answer.get(),
+                               answer_lock.get(),
+                               std::ref(leaf_min_heap_),
+                               leaf_pq_lock.get(),
+                               &visited_node_counter,
+                               &visited_series_counter,
+                               log_mutex.get());
   }
 
   for (ID_TYPE query_id = 0; query_id < config_->nf_train_nexample_; ++query_id) {
@@ -334,11 +354,11 @@ RESPONSE dstree::Index::nf_collect_mthread() {
     }
 
     for (ID_TYPE thread_id = 0; thread_id < config_->nf_collect_nthread_; ++thread_id) {
-      search_caches[thread_id]->query_id_ = query_id;
-      search_caches[thread_id]->query_series_ptr_ = series_ptr;
+      search_caches[thread_id].query_id_ = query_id;
+      search_caches[thread_id].query_series_ptr_ = series_ptr;
     }
 
-    VALUE_TYPE local_nn_distance = resident_node->search(series_ptr, m256_fetch_cache.get());
+    VALUE_TYPE local_nn_distance = resident_node->search(series_ptr, m256_fetch_cache);
     resident_node->neurofilter_->push_example(answer->get_bsf(), local_nn_distance);
 
     visited_node_counter += 1;
@@ -346,16 +366,16 @@ RESPONSE dstree::Index::nf_collect_mthread() {
 
     if (answer->is_bsf(local_nn_distance)) {
       MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-            "nf query %d update bsf %f after node %d series %s")
-            % query_id
-            % local_nn_distance
-            % visited_node_counter
-            % visited_series_counter;
+          "nf query %d update bsf %f after node %d series %s")
+          % query_id
+          % local_nn_distance
+          % visited_node_counter
+          % visited_series_counter;
 
       answer->push_bsf(local_nn_distance);
     }
 
-    std::stack<std::shared_ptr<dstree::Node>> node_stack;
+    assert(node_stack.empty() && leaf_min_heap_.empty());
     node_stack.push(root_);
 
     while (!node_stack.empty()) {
@@ -364,8 +384,8 @@ RESPONSE dstree::Index::nf_collect_mthread() {
 
       if (node_to_visit->is_leaf()) {
         if (node_to_visit->get_id() != resident_node->get_id()) {
-          VALUE_TYPE child_lower_bound_EDsquare = node_to_visit->cal_lower_bound_EDsquare(series_ptr);
-          leaf_min_heap_.push(std::make_tuple(node_to_visit, child_lower_bound_EDsquare));
+          leaf_min_heap_.push(std::make_tuple(node_to_visit,
+                                              node_to_visit->cal_lower_bound_EDsquare(series_ptr)));
         }
       } else {
         for (const auto &child_node : node_to_visit->children_) {
@@ -377,8 +397,7 @@ RESPONSE dstree::Index::nf_collect_mthread() {
     std::vector<std::thread> threads;
 
     for (ID_TYPE thread_id = 0; thread_id < config_->nf_collect_nthread_; ++thread_id) {
-      std::thread current_thread(search_thread_F, std::ref(*search_caches[thread_id]));
-      threads.push_back(std::move(current_thread));
+      threads.emplace_back(search_thread_F, search_caches[thread_id]);
     }
 
     for (ID_TYPE thread_id = 0; thread_id < config_->nf_collect_nthread_; ++thread_id) {
@@ -386,16 +405,20 @@ RESPONSE dstree::Index::nf_collect_mthread() {
     }
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+    //#ifndef DEBUGGED
     MALAT_LOG(logger_->logger, trivial::info) << boost::format(
           "nf query %d visited %d nodes %d series")
           % query_id
           % visited_node_counter
           % visited_series_counter;
-//#endif
+//                                              ("nf query " + std::to_string(query_id) + " visited " +
+//                                                  std::to_string(visited_node_counter) + " nodes " +
+//                                                  std::to_string(visited_series_counter) + " series");
+    //#endif
 #endif
   }
 
+  std::free(m256_fetch_cache);
   return SUCCESS;
 }
 
@@ -489,11 +512,11 @@ RESPONSE dstree::Index::nf_train_mthread() {
     at::cuda::CUDAStream new_stream = at::cuda::getStreamFromPool(false, config_->nf_device_id_);
 
     MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-          "thread %d stream id = %d, query = %d, priority = %d")
-          % thread_id
-          % new_stream.id()
-          % new_stream.query()
-          % new_stream.priority();
+        "thread %d stream id = %d, query = %d, priority = %d")
+        % thread_id
+        % new_stream.id()
+        % new_stream.query()
+        % new_stream.priority();
 
     train_caches.push_back(std::make_unique<TrainCache>(thread_id,
                                                         std::ref(*logger_),
@@ -520,14 +543,14 @@ RESPONSE dstree::Index::nf_train_mthread() {
 RESPONSE dstree::Index::train() {
   if (!fs::exists(config_->nf_query_filepath_)) {
     MALAT_LOG(logger_->logger, trivial::error) << boost::format(
-          "neurofilter train query filepath %s does not exist")
-          % config_->nf_query_filepath_;
+        "neurofilter train query filepath %s does not exist")
+        % config_->nf_query_filepath_;
   } else {
     std::ifstream query_fin(config_->nf_query_filepath_, std::ios::in | std::ios::binary);
     if (!query_fin.good()) {
       MALAT_LOG(logger_->logger, trivial::error) << boost::format(
-            "neurofilter train query filepath %s cannot open")
-            % config_->nf_query_filepath_;
+          "neurofilter train query filepath %s cannot open")
+          % config_->nf_query_filepath_;
     }
 
     auto query_nbytes = static_cast<ID_TYPE>(
@@ -538,9 +561,9 @@ RESPONSE dstree::Index::train() {
 
     if (query_fin.fail()) {
       MALAT_LOG(logger_->logger, trivial::error) << boost::format(
-            "cannot read %d bytes from %s")
-            % config_->nf_query_filepath_
-            % query_nbytes;
+          "cannot read %d bytes from %s")
+          % config_->nf_query_filepath_
+          % query_nbytes;
 
       std::free(nf_train_query_ptr_);
       nf_train_query_ptr_ = nullptr;
@@ -549,7 +572,7 @@ RESPONSE dstree::Index::train() {
 
   if (nf_train_query_ptr_ == nullptr) {
     MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-          "generate synthetic neurofilter train queries");
+        "generate synthetic neurofilter train queries");
 
     // TODO
   }
@@ -570,8 +593,8 @@ RESPONSE dstree::Index::train() {
   nf_initialize(root_, &filter_id);
 
   MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-        "initialized %d neurofilters")
-        % filter_id;
+      "initialized %d neurofilters")
+      % filter_id;
 
   if (config_->nf_train_is_mthread_) {
     nf_collect_mthread();
@@ -605,8 +628,8 @@ RESPONSE dstree::Index::dump() {
 RESPONSE dstree::Index::search() {
   if (!fs::exists(config_->query_filepath_)) {
     MALAT_LOG(logger_->logger, trivial::error) << boost::format(
-          "query filepath does not exist = %s")
-          % config_->query_filepath_;
+        "query filepath does not exist = %s")
+        % config_->query_filepath_;
 
     return FAILURE;
   }
@@ -614,8 +637,8 @@ RESPONSE dstree::Index::search() {
   std::ifstream query_fin(config_->query_filepath_, std::ios::in | std::ios::binary);
   if (!query_fin.good()) {
     MALAT_LOG(logger_->logger, trivial::error) << boost::format(
-          "query filepath cannot open = %s")
-          % config_->db_filepath_;
+        "query filepath cannot open = %s")
+        % config_->db_filepath_;
 
     return FAILURE;
   }
@@ -627,9 +650,9 @@ RESPONSE dstree::Index::search() {
 
   if (query_fin.fail()) {
     MALAT_LOG(logger_->logger, trivial::error) << boost::format(
-          "cannot read %d bytes from %s")
-          % config_->db_filepath_
-          % query_nbytes;
+        "cannot read %d bytes from %s")
+        % config_->db_filepath_
+        % query_nbytes;
 
     return FAILURE;
   }
@@ -704,14 +727,14 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
                 VALUE_TYPE predicted_nn_distance = node_to_visit->neurofilter_->infer(nf_query_tsr_);
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+                //#ifndef DEBUGGED
                 MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
                       "query %d node_id %d predicted_nn_distance %.3f bsf %.3f")
                       % answer->query_id_
                       % node_to_visit->get_id()
                       % predicted_nn_distance
                       % answer->get_bsf();
-//#endif
+                //#endif
 #endif
 
                 if (predicted_nn_distance < answer->get_bsf()) {
@@ -739,26 +762,26 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
   }
 
   MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-        "query %d visited %d nodes %d series")
-        % query_id
-        % visited_node_counter
-        % visited_series_counter;
+      "query %d visited %d nodes %d series")
+      % query_id
+      % visited_node_counter
+      % visited_series_counter;
 
   if (config_->require_neurofilter_) {
     MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-          "query %d neurofilters pruned %d nodes %d series")
-          % query_id
-          % nfpruned_node_counter
-          % nfpruned_series_counter;
+        "query %d neurofilters pruned %d nodes %d series")
+        % query_id
+        % nfpruned_node_counter
+        % nfpruned_series_counter;
   }
 
   ID_TYPE nnn_to_return = config_->n_nearest_neighbor_;
   while (!answer->empty()) {
     MALAT_LOG(logger_->logger, trivial::info) << boost::format(
-          "query %d nn %d = %f")
-          % query_id
-          % nnn_to_return
-          % answer->pop_bsf();
+        "query %d nn %d = %f")
+        % query_id
+        % nnn_to_return
+        % answer->pop_bsf();
 
     nnn_to_return -= 1;
   }

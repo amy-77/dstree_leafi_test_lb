@@ -62,5 +62,5 @@ upcite::Logger::Logger(std::string log_filepath) {
   logging::core::get()->add_sink(sink_);
   logging::add_common_attributes();
 
-  logger = std::make_unique<src::severity_logger<logging::trivial::severity_level> >();
+  logger = std::make_unique<src::severity_logger_mt<logging::trivial::severity_level> >();
 }

@@ -11,6 +11,8 @@
 
 #include "global.h"
 
+namespace constant = upcite::constant;
+
 namespace upcite {
 namespace dstree {
 
@@ -23,14 +25,19 @@ class Answer {
     if (bsf_distances_.size() < capacity_) {
       return true;
     } else {
-      return distance < bsf_distances_.top();
+//      return distance < bsf_distances_.top();
+      return distance < bsf_distance_;
     }
   }
 
   RESPONSE push_bsf(VALUE_TYPE distance);
   RESPONSE check_push_bsf(VALUE_TYPE distance);
 
-  VALUE_TYPE get_bsf() const { return bsf_distances_.top(); };
+  VALUE_TYPE get_bsf() const {
+//    return bsf_distances_.top();
+    return bsf_distance_;
+  };
+
   VALUE_TYPE pop_bsf();
 
   RESPONSE reset(ID_TYPE query_id) {
@@ -40,6 +47,8 @@ class Answer {
       bsf_distances_.pop();
     }
 
+    bsf_distance_ = constant::MAX_VALUE;
+
     return SUCCESS;
   }
 
@@ -47,13 +56,14 @@ class Answer {
 
   ID_TYPE query_id_;
 
-  std::priority_queue<VALUE_TYPE, std::vector<VALUE_TYPE>, std::less<>> bsf_distances_;
+//  std::priority_queue<VALUE_TYPE, std::vector<VALUE_TYPE>, std::less<>> bsf_distances_;
 
  private:
   ID_TYPE capacity_;
+  VALUE_TYPE bsf_distance_;
 
   // TODO with-id bsf heap
-//  std::priority_queue<VALUE_TYPE, std::vector<VALUE_TYPE>, std::greater<>> bsf_distances_;
+  std::priority_queue<VALUE_TYPE, std::vector<VALUE_TYPE>, std::less<>> bsf_distances_;
 };
 
 }

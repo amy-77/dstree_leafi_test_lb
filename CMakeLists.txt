@@ -39,8 +39,9 @@ add_subdirectory(src/util)
 add_subdirectory(src/common)
 add_subdirectory(src/exec)
 
-add_compile_options(-g -O3)
+add_compile_options(-g -Werror -O3)
 #add_compile_options(-O3)
+add_compile_options(-fsanitize=address -fsanitize=undefined -D_GLIBCXX_DEBUG)
 
 target_compile_features(${TARGET} PRIVATE cxx_std_14)
 
@@ -50,4 +51,4 @@ target_link_libraries(${TARGET}
 
 install(TARGETS ${TARGET} DESTINATION ${PROJECT_SOURCE_DIR}/bin)
 
-add_subdirectory(test)
+#add_subdirectory(test)

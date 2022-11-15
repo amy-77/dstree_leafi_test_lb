@@ -56,8 +56,8 @@ void adjust_learning_rate(torch::optim::SGD &optimizer,
   }
 }
 
-dstree::Filter::Filter(const std::shared_ptr<upcite::Logger> &logger,
-                       const std::shared_ptr<dstree::Config> &config,
+dstree::Filter::Filter(upcite::Logger &logger,
+                       dstree::Config &config,
                        ID_TYPE id,
                        std::reference_wrapper<torch::Tensor> shared_train_queries) :
     logger_(logger),
@@ -66,23 +66,23 @@ dstree::Filter::Filter(const std::shared_ptr<upcite::Logger> &logger,
     shared_train_queries_(shared_train_queries),
     is_trained_(false),
     train_size_(0) {
-  torch::Device device = torch::Device(c10::DeviceType::Lazy);
+//  torch::Device device = torch::Device(c10::DeviceType::Lazy);
 
-  if (config_->nf_train_is_gpu_) {
+  if (config.nf_train_is_gpu_) {
     // TODO support multiple devices
-    device_ = std::make_unique<torch::Device>(torch::kCUDA, static_cast<c10::DeviceIndex>(config_->nf_device_id_));
+    device_ = std::make_unique<torch::Device>(torch::kCUDA, static_cast<c10::DeviceIndex>(config.nf_device_id_));
   } else {
     device_ = std::make_unique<torch::Device>(torch::kCPU);
   }
 
-  model_ = std::make_unique<dstree::MLP>(config_->series_length_,
-                                         config_->nf_dim_latent_,
-                                         config_->nf_train_dropout_p_,
-                                         config_->nf_leaky_relu_negative_slope_);
+  model_ = std::make_unique<dstree::MLP>(config.series_length_,
+                                         config.nf_dim_latent_,
+                                         config.nf_train_dropout_p_,
+                                         config.nf_leaky_relu_negative_slope_);
   model_->to(*device_);
 
-  bsf_distances_.reserve(config_->nf_train_nexample_);
-  nn_distances_.reserve(config_->nf_train_nexample_);
+  bsf_distances_.reserve(config.nf_train_nexample_);
+  nn_distances_.reserve(config.nf_train_nexample_);
 }
 
 RESPONSE dstree::Filter::train() {
@@ -92,36 +92,36 @@ RESPONSE dstree::Filter::train() {
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
-  if (train_size_ < config_->nf_train_nexample_) {
-    MALAT_LOG(logger_->logger, trivial::error) << boost::format(
+  if (train_size_ < config_.get().nf_train_nexample_) {
+    MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
           "%d train examples collected; expected %d")
           % train_size_
-          % config_->nf_train_nexample_;
+          % config_.get().nf_train_nexample_;
   }
 //#endif
 #endif
 
   ID_TYPE stream_id = -1;
-  if (config_->nf_train_is_gpu_) {
-    stream_id = at::cuda::getCurrentCUDAStream(config_->nf_device_id_).id();
+  if (config_.get().nf_train_is_gpu_) {
+    stream_id = at::cuda::getCurrentCUDAStream(config_.get().nf_device_id_).id(); // compiles with libtorch-gpu
   }
 
 #ifdef DEBUG
   if (!node_lower_bound_distances_.empty()) {
-    MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
+    MALAT_LOG(logger_.get().logger, trivial::debug) << boost::format(
           "stream %d filter %d node distances = %s")
           % stream_id
           % id_
           % upcite::get_str(node_lower_bound_distances_.data(), train_size_);
   }
 
-  MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
+  MALAT_LOG(logger_.get().logger, trivial::debug) << boost::format(
         "stream %d filter %d bsf distances = %s")
         % stream_id
         % id_
         % upcite::get_str(bsf_distances_.data(), train_size_);
 
-  MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
+  MALAT_LOG(logger_.get().logger, trivial::debug) << boost::format(
         "stream %d filter %d nn distances = %s")
         % stream_id
         % id_
@@ -134,22 +134,22 @@ RESPONSE dstree::Filter::train() {
 
   auto dataset = SeriesDataset(shared_train_queries_, nn_distances_, num_train_examples, *device_);
   auto data_loader = torch::data::make_data_loader<torch::data::samplers::RandomSampler>(
-      dataset.map(torch::data::transforms::Stack<>()), config_->nf_train_batchsize_);
+      dataset.map(torch::data::transforms::Stack<>()), config_.get().nf_train_batchsize_);
 
-  torch::optim::SGD optimizer(model_->parameters(), config_->nf_train_learning_rate_);
+  torch::optim::SGD optimizer(model_->parameters(), config_.get().nf_train_learning_rate_);
 
 #ifdef DEBUG
   std::vector<float> global_losses, local_losses;
-  global_losses.reserve(config_->nf_train_nepoch_);
-  local_losses.reserve(num_train_examples / config_->nf_train_batchsize_ + 1);
+  global_losses.reserve(config_.get().nf_train_nepoch_);
+  local_losses.reserve(num_train_examples / config_.get().nf_train_batchsize_ + 1);
 #endif
 
-  for (size_t epoch = 0; epoch < config_->nf_train_nepoch_; ++epoch) {
+  for (size_t epoch = 0; epoch < config_.get().nf_train_nepoch_; ++epoch) {
     adjust_learning_rate(optimizer,
-                         config_->nf_train_learning_rate_,
-                         config_->nf_train_min_lr_,
+                         config_.get().nf_train_learning_rate_,
+                         config_.get().nf_train_min_lr_,
                          epoch,
-                         config_->nf_train_nepoch_);
+                         config_.get().nf_train_nepoch_);
 
     for (auto &batch : *data_loader) {
       auto batch_data = batch.data, batch_target = batch.target;
@@ -161,8 +161,8 @@ RESPONSE dstree::Filter::train() {
 
       loss.backward();
       auto norm = torch::nn::utils::clip_grad_norm_(model_->parameters(),
-                                                    config_->nf_train_clip_grad_max_norm_,
-                                                    config_->nf_train_clip_grad_norm_type_);
+                                                    config_.get().nf_train_clip_grad_max_norm_,
+                                                    config_.get().nf_train_clip_grad_norm_type_);
       optimizer.step();
 
 #ifdef DEBUG
@@ -178,11 +178,11 @@ RESPONSE dstree::Filter::train() {
   }
 
 #ifdef DEBUG
-  MALAT_LOG(logger_->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
         "stream %d filter %d losses = %s")
         % stream_id
         % id_
-        % upcite::get_str(global_losses.data(), config_->nf_train_nepoch_);
+        % upcite::get_str(global_losses.data(), config_.get().nf_train_nepoch_);
 #endif
   optimizer.zero_grad();
   for (const auto &parameter : model_->parameters()) {
@@ -198,7 +198,7 @@ RESPONSE dstree::Filter::train() {
 
     auto predictions = model_->forward(shared_train_queries_).detach().to(torch::Device(torch::kCPU));
 
-    MALAT_LOG(logger_->logger, trivial::info) << boost::format(
+    MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
           "stream %d filter %d predictions = %s")
           % stream_id
           % id_
@@ -219,7 +219,7 @@ RESPONSE dstree::Filter::train() {
     }
 
     if (id_ == 0) {
-      MALAT_LOG(logger_->logger, trivial::info) << boost::format(
+      MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
             "filter %d size = %.3fMB")
             % id_
             % (static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024));

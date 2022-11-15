@@ -21,8 +21,8 @@ namespace dstree {
 
 class Filter {
  public:
-  explicit Filter(const std::shared_ptr<upcite::Logger> &logger,
-                  const std::shared_ptr<dstree::Config> &config,
+  explicit Filter(upcite::Logger &logger,
+                  dstree::Config &config,
                   ID_TYPE id,
                   std::reference_wrapper<torch::Tensor> shared_train_queries);
   ~Filter() = default;
@@ -43,11 +43,11 @@ class Filter {
  private:
   ID_TYPE id_;
 
-  const std::shared_ptr<upcite::Logger> &logger_;
-  const std::shared_ptr<dstree::Config> &config_;
+  std::reference_wrapper<upcite::Logger> logger_;
+  std::reference_wrapper<dstree::Config> config_;
 
   std::unique_ptr<NFModel> model_;
-  std::unique_ptr<torch::Device> device_;
+  std::unique_ptr<torch::Device> device_; // TODO ref?
 
   bool is_trained_;
   unsigned int train_size_;

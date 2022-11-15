@@ -12,11 +12,11 @@
 namespace dstree = upcite::dstree;
 
 int main(int argc, char *argv[]) {
-  std::shared_ptr<dstree::Config> config =  std::make_shared<dstree::Config>(argc, argv);
-  std::shared_ptr<upcite::Logger> logger = std::make_shared<upcite::Logger>(config->log_filepath_);
-  config->log(logger);
+  std::unique_ptr<dstree::Config> config = std::make_unique<dstree::Config>(argc, argv);
+  std::unique_ptr<upcite::Logger> logger = std::make_unique<upcite::Logger>(config->log_filepath_);
+  config->log(*logger);
 
-  std::unique_ptr<dstree::Index> index = std::make_unique<dstree::Index>(config, logger);
+  std::unique_ptr<dstree::Index> index = std::make_unique<dstree::Index>(*config, *logger);
 
   index->build();
   index->dump();

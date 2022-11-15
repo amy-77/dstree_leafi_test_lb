@@ -29,8 +29,8 @@ class EAPCA {
   VALUE_TYPE get_subsegment_value(ID_TYPE subsegment_id,
                                   bool is_mean = true) const;
 
-  RESPONSE split(const std::shared_ptr<Config> &config,
-                 const std::shared_ptr<Split> &split,
+  RESPONSE split(const Config &config,
+                 const Split &split,
                  const std::vector<ID_TYPE> &segment_lengths,
                  const std::vector<ID_TYPE> &subsegment_lengths);
 
@@ -45,19 +45,19 @@ class EAPCA {
 
 class EAPCAEnvelope {
  public:
-  explicit EAPCAEnvelope(const std::shared_ptr<EAPCAEnvelope> &eapca_envelope);
-  EAPCAEnvelope(const std::shared_ptr<Config> &config,
+  explicit EAPCAEnvelope(const EAPCAEnvelope &eapca_envelope);
+  EAPCAEnvelope(const Config &config,
                 ID_TYPE nsegment);
-  EAPCAEnvelope(const std::shared_ptr<Config> &config,
-                const std::shared_ptr<EAPCAEnvelope> &parent_eapca_envelope,
-                const std::shared_ptr<Split> &parent_split,
-                const std::shared_ptr<upcite::Logger> &logger = nullptr);
+  EAPCAEnvelope(const Config &config,
+                const EAPCAEnvelope &parent_eapca_envelope,
+                const Split &parent_split,
+                const upcite::Logger &logger);
   ~EAPCAEnvelope() = default;
 
-  RESPONSE update(const std::shared_ptr<dstree::EAPCA> &series_eapca);
+  RESPONSE update(const dstree::EAPCA &series_eapca);
 
   VALUE_TYPE cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr,
-                                      const std::shared_ptr<upcite::Logger>& logger) const;
+                                      const upcite::Logger &logger) const;
   VALUE_TYPE cal_upper_bound_EDsquare(const VALUE_TYPE *series_ptr) const;
 
   EAPCAEnvelope &operator=(const EAPCAEnvelope &eapca_envelope) = default;

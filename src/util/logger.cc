@@ -6,7 +6,6 @@
 #include "logger.h"
 
 #include <ostream>
-#include <fstream>
 #include <memory>
 
 #include <boost/filesystem.hpp>
@@ -21,13 +20,16 @@
 namespace expr = boost::log::expressions;
 namespace fs = boost::filesystem;
 
-void my_formatter(logging::record_view const &rec, logging::formatting_ostream &strm) {
+namespace constant = upcite::constant;
+
+void my_formatter(const logging::record_view &rec, logging::formatting_ostream &strm) {
   // https://stackoverflow.com/a/60112004
 //  strm << expr::format_date_time<boost::posix_time::ptime>("TimeStamp", "%Y%m%d_%H:%M:%S.%f") << " ";
   if (auto timestamp = boost::log::extract<boost::posix_time::ptime>("TimeStamp", rec)) {
     std::tm ts = boost::posix_time::to_tm(*timestamp);
 
-    char buf[128];
+//    char buf[constant::STR_DEFAULT_SIZE];
+    char buf[256];
     if (std::strftime(buf, sizeof(buf), "%y%m%d%H%M%S", &ts) > 0) {
       strm << buf << " ";
     }

@@ -16,12 +16,12 @@
 namespace upcite {
 namespace dstree {
 
-class Config : std::enable_shared_from_this<Config> {
+class Config {
  public:
   Config(int argc, char *argv[]);
   ~Config() = default;
 
-  void log(std::shared_ptr<upcite::Logger> &logger);
+  void log(upcite::Logger &logger);
 
   std::string log_filepath_;
 

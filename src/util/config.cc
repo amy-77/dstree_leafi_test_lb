@@ -217,127 +217,127 @@ dstree::Config::Config(int argc, char *argv[]) :
   }
 }
 
-void dstree::Config::log(std::shared_ptr<upcite::Logger> &logger) {
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+void dstree::Config::log(upcite::Logger &logger) {
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "db_filepath = %s")
         % db_filepath_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "query_filepath = %s")
         % query_filepath_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "is_znormalized = %d")
         % is_znormalized_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "db_size = %d")
         % db_nseries_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "query_size = %d")
         % query_nseries_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "leaf_size = %d")
         % leaf_max_nseries_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "batch_load_nseries = %d")
         % batch_load_nseries_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "default_nbuffer = %d")
         % default_nbuffer_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "on_disk = %d")
         % on_disk_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "index_persist_folderpath = %s")
         % index_persist_folderpath_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "index_persist_file_postfix = %s")
         % index_persist_file_postfix_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "node_nchild = %d")
         % node_nchild_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "vertical_split_nsubsegment = %d")
         % vertical_split_nsubsegment_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "vertical_split_gain_tradeoff_factor = %.3f")
         % vertical_split_gain_tradeoff_factor_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "is_exact_search = %d")
         % is_exact_search_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "search_max_nseries = %d")
         % search_max_nseries_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "search_max_nnode = %d")
         % search_max_nnode_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "n_nearest_neighbor = %d")
         % n_nearest_neighbor_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "is_ground_truth = %d")
         % is_ground_truth_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "require_neurofilter = %d")
         % require_neurofilter_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_dim_latent = %d")
         % nf_dim_latent_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_leaky_relu_negative_slope = %.3f")
         % nf_leaky_relu_negative_slope_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_dropout_p = %.3f")
         % nf_train_dropout_p_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_is_gpu = %d")
         % nf_train_is_gpu_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_infer_is_gpu = %d")
         % nf_infer_is_gpu_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_device_id = %d")
         % nf_device_id_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_nexample = %d")
         % nf_train_nexample_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_batchsize = %d")
         % nf_train_batchsize_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_nepoch = %d")
         % nf_train_nepoch_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_learning_rate = %.3f")
         % nf_train_learning_rate_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_min_lr = %.3f")
         % nf_train_min_lr_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_clip_grad_norm_type = %.3f")
         % nf_train_clip_grad_norm_type_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_clip_grad_max_norm = %.3f")
         % nf_train_clip_grad_max_norm_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_query_filepath = %s")
         % nf_query_filepath_;
 
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_mthread = %d")
         % nf_train_is_mthread_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_collect_nthread = %d")
         % nf_collect_nthread_;
-  MALAT_LOG(logger->logger, trivial::info) << boost::format(
+  MALAT_LOG(logger.logger, trivial::info) << boost::format(
         "nf_train_nthread = %d")
         % nf_train_nthread_;
 }

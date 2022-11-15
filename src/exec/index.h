@@ -21,7 +21,7 @@
 namespace upcite {
 namespace dstree {
 
-using NODE_DISTNCE = std::tuple<std::shared_ptr<dstree::Node>, VALUE_TYPE>;
+using NODE_DISTNCE = std::tuple<std::reference_wrapper<dstree::Node>, VALUE_TYPE>;
 
 class Compare {
  public:
@@ -32,7 +32,7 @@ class Compare {
 
 class Index {
  public:
-  Index(std::shared_ptr<Config> config, std::shared_ptr<upcite::Logger> logger);
+  Index(Config &config, upcite::Logger &logger);
   ~Index();
 
   RESPONSE build();
@@ -47,19 +47,19 @@ class Index {
  private:
   RESPONSE insert(ID_TYPE batch_series_id);
 
-  RESPONSE nf_initialize(std::shared_ptr<dstree::Node> &node,
+  RESPONSE nf_initialize(dstree::Node &node,
                          ID_TYPE *filter_id);
   RESPONSE nf_collect();
   RESPONSE nf_collect_mthread();
   RESPONSE nf_train();
   RESPONSE nf_train_mthread();
 
-  std::shared_ptr<Config> config_;
-  std::shared_ptr<upcite::Logger> logger_;
+  std::reference_wrapper<Config> config_;
+  std::reference_wrapper<upcite::Logger> logger_;
 
   std::unique_ptr<BufferManager> buffer_manager_;
 
-  std::shared_ptr<Node> root_;
+  std::unique_ptr<Node> root_;
   ID_TYPE nnode_, nleaf_;
   std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare> leaf_min_heap_;
 

@@ -71,27 +71,27 @@ dstree::EAPCA::EAPCA(const VALUE_TYPE *series_ptr,
   nsubsegment_ = 2;
 }
 
-RESPONSE dstree::EAPCA::split(const std::shared_ptr<dstree::Config> &config,
-                              const std::shared_ptr<Split> &split,
+RESPONSE dstree::EAPCA::split(const dstree::Config &config,
+                              const Split &split,
                               const std::vector<ID_TYPE> &segment_lengths,
                               const std::vector<ID_TYPE> &subsegment_lengths) {
   // TODO enable non-splittable segment
   // assume all segments could be vertical split, i.e., segment_length >= config->vertical_split_nsubsegment_
 
-  if (split->is_vertical_split_) {
+  if (split.is_vertical_split_) {
     auto segment_mean_iter = segment_means_.begin();
-    std::advance(segment_mean_iter, split->split_segment_id_);
+    std::advance(segment_mean_iter, split.split_segment_id_);
 
     auto subsegment_mean_iter = subsegment_means_.begin();
-    std::advance(subsegment_mean_iter, config->vertical_split_nsubsegment_ * split->split_segment_id_);
+    std::advance(subsegment_mean_iter, config.vertical_split_nsubsegment_ * split.split_segment_id_);
 
     auto segment_std_iter = segment_stds_.begin();
-    std::advance(segment_std_iter, split->split_segment_id_);
+    std::advance(segment_std_iter, split.split_segment_id_);
 
     auto subsegment_std_iter = subsegment_stds_.begin();
-    std::advance(subsegment_std_iter, config->vertical_split_nsubsegment_ * split->split_segment_id_);
+    std::advance(subsegment_std_iter, config.vertical_split_nsubsegment_ * split.split_segment_id_);
 
-    for (ID_TYPE i = 1; i < config->vertical_split_nsubsegment_; ++i) {
+    for (ID_TYPE i = 1; i < config.vertical_split_nsubsegment_; ++i) {
       segment_means_.insert(segment_mean_iter, *subsegment_mean_iter);
       subsegment_mean_iter = subsegment_means_.erase(subsegment_mean_iter);
 
@@ -106,11 +106,11 @@ RESPONSE dstree::EAPCA::split(const std::shared_ptr<dstree::Config> &config,
     subsegment_std_iter = subsegment_stds_.erase(subsegment_std_iter);
 
     ID_TYPE value_offset = 0;
-    for (ID_TYPE i = 0; i < split->split_segment_id_; ++i) {
+    for (ID_TYPE i = 0; i < split.split_segment_id_; ++i) {
       value_offset += segment_lengths[i];
     }
 
-    nsegment_ += config->vertical_split_nsubsegment_ - 1;
+    nsegment_ += config.vertical_split_nsubsegment_ - 1;
 
 #ifdef DEBUG
     assert(nsegment_ == segment_means_.size());
@@ -118,22 +118,22 @@ RESPONSE dstree::EAPCA::split(const std::shared_ptr<dstree::Config> &config,
 #endif
 
     VALUE_TYPE mean, std;
-    ID_TYPE subsegment_offset = config->vertical_split_nsubsegment_ * split->split_segment_id_;
+    ID_TYPE subsegment_offset = config.vertical_split_nsubsegment_ * split.split_segment_id_;
 
     for (ID_TYPE subsegment_local_id = 0;
-         subsegment_local_id < config->vertical_split_nsubsegment_;
+         subsegment_local_id < config.vertical_split_nsubsegment_;
          ++subsegment_local_id) {
       ID_TYPE subsegment_length = subsegment_lengths[subsegment_offset + subsegment_local_id];
-      ID_TYPE subsubsegment_length = subsegment_length / config->vertical_split_nsubsegment_;
+      ID_TYPE subsubsegment_length = subsegment_length / config.vertical_split_nsubsegment_;
       ID_TYPE last_subsubsegment_length =
-          subsegment_length - subsubsegment_length * (config->vertical_split_nsubsegment_ - 1);
+          subsegment_length - subsubsegment_length * (config.vertical_split_nsubsegment_ - 1);
 
 #ifdef DEBUG
       assert(subsubsegment_length > 0);
       assert(last_subsubsegment_length > 0);
 #endif
 
-      for (ID_TYPE i = 1; i < config->vertical_split_nsubsegment_; ++i) {
+      for (ID_TYPE i = 1; i < config.vertical_split_nsubsegment_; ++i) {
         std::tie(mean, std) = upcite::cal_mean_std(series_ptr_ + value_offset, subsubsegment_length);
 
         subsegment_means_.insert(subsegment_mean_iter, mean);
@@ -150,7 +150,7 @@ RESPONSE dstree::EAPCA::split(const std::shared_ptr<dstree::Config> &config,
       value_offset += last_subsubsegment_length;
     }
 
-    nsubsegment_ += (config->vertical_split_nsubsegment_ - 1) * config->vertical_split_nsubsegment_;
+    nsubsegment_ += (config.vertical_split_nsubsegment_ - 1) * config.vertical_split_nsubsegment_;
 
 #ifdef DEBUG
     assert(nsubsegment_ == subsegment_means_.size());
@@ -185,40 +185,40 @@ VALUE_TYPE dstree::EAPCA::get_subsegment_value(ID_TYPE subsegment_id, bool is_me
   }
 }
 
-dstree::EAPCAEnvelope::EAPCAEnvelope(const std::shared_ptr<dstree::EAPCAEnvelope> &eapca_envelope) {
-  nsegment_ = eapca_envelope->nsegment_;
-  nsubsegment_ = eapca_envelope->nsubsegment_;
+dstree::EAPCAEnvelope::EAPCAEnvelope(const dstree::EAPCAEnvelope &eapca_envelope) {
+  nsegment_ = eapca_envelope.nsegment_;
+  nsubsegment_ = eapca_envelope.nsubsegment_;
 
-  segment_lengths_ = eapca_envelope->segment_lengths_;
-  subsegment_lengths_ = eapca_envelope->subsegment_lengths_;
+  segment_lengths_ = eapca_envelope.segment_lengths_;
+  subsegment_lengths_ = eapca_envelope.subsegment_lengths_;
 
-  segment_min_means_ = eapca_envelope->segment_min_means_;
-  segment_max_means_ = eapca_envelope->segment_max_means_;
-  segment_min_stds_ = eapca_envelope->segment_min_stds_;
-  segment_max_stds_ = eapca_envelope->segment_max_stds_;
+  segment_min_means_ = eapca_envelope.segment_min_means_;
+  segment_max_means_ = eapca_envelope.segment_max_means_;
+  segment_min_stds_ = eapca_envelope.segment_min_stds_;
+  segment_max_stds_ = eapca_envelope.segment_max_stds_;
 
-  subsegment_min_means_ = eapca_envelope->subsegment_min_means_;
-  subsegment_max_means_ = eapca_envelope->subsegment_max_means_;
-  subsegment_min_stds_ = eapca_envelope->subsegment_min_stds_;
-  subsegment_max_stds_ = eapca_envelope->subsegment_max_stds_;
+  subsegment_min_means_ = eapca_envelope.subsegment_min_means_;
+  subsegment_max_means_ = eapca_envelope.subsegment_max_means_;
+  subsegment_min_stds_ = eapca_envelope.subsegment_min_stds_;
+  subsegment_max_stds_ = eapca_envelope.subsegment_max_stds_;
 }
 
-dstree::EAPCAEnvelope::EAPCAEnvelope(const std::shared_ptr<Config> &config,
+dstree::EAPCAEnvelope::EAPCAEnvelope(const Config &config,
                                      ID_TYPE nsegment) {
   nsegment_ = nsegment;
-  nsubsegment_ = nsegment_ * config->vertical_split_nsubsegment_;
+  nsubsegment_ = nsegment_ * config.vertical_split_nsubsegment_;
 
-  ID_TYPE series_length = config->series_length_;
+  ID_TYPE series_length = config.series_length_;
   ID_TYPE segment_length = series_length / nsegment_;
 
 #ifdef DEBUG
-  assert(segment_length > config->vertical_split_nsubsegment_);
+  assert(segment_length > config.vertical_split_nsubsegment_);
 #endif
 
   segment_lengths_.assign(nsegment_ - 1, segment_length);
 
-  ID_TYPE subsegment_length = segment_length / config->vertical_split_nsubsegment_;
-  ID_TYPE last_subsegment_length = segment_length - subsegment_length * (config->vertical_split_nsubsegment_ - 1);
+  ID_TYPE subsegment_length = segment_length / config.vertical_split_nsubsegment_;
+  ID_TYPE last_subsegment_length = segment_length - subsegment_length * (config.vertical_split_nsubsegment_ - 1);
 
 #ifdef DEBUG
   assert(subsegment_length > 0);
@@ -226,27 +226,27 @@ dstree::EAPCAEnvelope::EAPCAEnvelope(const std::shared_ptr<Config> &config,
 #endif
 
   for (ID_TYPE segment_id = 0; segment_id < nsegment_ - 1; ++segment_id) {
-    subsegment_lengths_.insert(subsegment_lengths_.end(), config->vertical_split_nsubsegment_ - 1, subsegment_length);
+    subsegment_lengths_.insert(subsegment_lengths_.end(), config.vertical_split_nsubsegment_ - 1, subsegment_length);
     subsegment_lengths_.push_back(last_subsegment_length);
   }
 
   ID_TYPE last_segment_length = series_length - segment_length * (nsegment_ - 1);
 
 #ifdef DEBUG
-  assert(last_segment_length > config->vertical_split_nsubsegment_);
+  assert(last_segment_length > config.vertical_split_nsubsegment_);
 #endif
 
   segment_lengths_.push_back(last_segment_length);
 
-  subsegment_length = last_segment_length / config->vertical_split_nsubsegment_;
-  last_subsegment_length = last_segment_length - subsegment_length * (config->vertical_split_nsubsegment_ - 1);
+  subsegment_length = last_segment_length / config.vertical_split_nsubsegment_;
+  last_subsegment_length = last_segment_length - subsegment_length * (config.vertical_split_nsubsegment_ - 1);
 
 #ifdef DEBUG
   assert(subsegment_length > 0);
   assert(last_subsegment_length > 0);
 #endif
 
-  subsegment_lengths_.insert(subsegment_lengths_.end(), config->vertical_split_nsubsegment_ - 1, subsegment_length);
+  subsegment_lengths_.insert(subsegment_lengths_.end(), config.vertical_split_nsubsegment_ - 1, subsegment_length);
   subsegment_lengths_.push_back(last_subsegment_length);
 
 #ifdef DEBUG
@@ -256,26 +256,26 @@ dstree::EAPCAEnvelope::EAPCAEnvelope(const std::shared_ptr<Config> &config,
   initialize_stats();
 }
 
-dstree::EAPCAEnvelope::EAPCAEnvelope(const std::shared_ptr<Config> &config,
-                                     const std::shared_ptr<dstree::EAPCAEnvelope> &parent_eapca_envelope,
-                                     const std::shared_ptr<dstree::Split> &parent_split,
-                                     const std::shared_ptr<upcite::Logger> &logger) {
-  if (parent_split->is_vertical_split_) {
-    nsegment_ = parent_eapca_envelope->nsegment_ + config->vertical_split_nsubsegment_ - 1;
-    nsubsegment_ = parent_eapca_envelope->nsubsegment_ +
-        +config->vertical_split_nsubsegment_ * (config->vertical_split_nsubsegment_ - 1);
+dstree::EAPCAEnvelope::EAPCAEnvelope(const Config &config,
+                                     const dstree::EAPCAEnvelope &parent_eapca_envelope,
+                                     const dstree::Split &parent_split,
+                                     const upcite::Logger &logger) {
+  if (parent_split.is_vertical_split_) {
+    nsegment_ = parent_eapca_envelope.nsegment_ + config.vertical_split_nsubsegment_ - 1;
+    nsubsegment_ = parent_eapca_envelope.nsubsegment_ +
+        +config.vertical_split_nsubsegment_ * (config.vertical_split_nsubsegment_ - 1);
 
-    for (ID_TYPE segment_id = 0; segment_id < parent_eapca_envelope->nsegment_; ++segment_id) {
-      if (segment_id == parent_split->split_segment_id_) {
-        for (ID_TYPE subsegment_id = segment_id * config->vertical_split_nsubsegment_;
-             subsegment_id < (segment_id + 1) * config->vertical_split_nsubsegment_;
+    for (ID_TYPE segment_id = 0; segment_id < parent_eapca_envelope.nsegment_; ++segment_id) {
+      if (segment_id == parent_split.split_segment_id_) {
+        for (ID_TYPE subsegment_id = segment_id * config.vertical_split_nsubsegment_;
+             subsegment_id < (segment_id + 1) * config.vertical_split_nsubsegment_;
              ++subsegment_id) {
-          segment_lengths_.push_back(parent_eapca_envelope->subsegment_lengths_[subsegment_id]);
+          segment_lengths_.push_back(parent_eapca_envelope.subsegment_lengths_[subsegment_id]);
 
-          ID_TYPE subsegment_length = parent_eapca_envelope->subsegment_lengths_[subsegment_id];
-          ID_TYPE subsubsegment_length = subsegment_length / config->vertical_split_nsubsegment_;
+          ID_TYPE subsegment_length = parent_eapca_envelope.subsegment_lengths_[subsegment_id];
+          ID_TYPE subsubsegment_length = subsegment_length / config.vertical_split_nsubsegment_;
           ID_TYPE last_subsubsegment_length =
-              subsegment_length - subsubsegment_length * (config->vertical_split_nsubsegment_ - 1);
+              subsegment_length - subsubsegment_length * (config.vertical_split_nsubsegment_ - 1);
 
 #ifdef DEBUG
           assert(subsubsegment_length > 0);
@@ -283,34 +283,34 @@ dstree::EAPCAEnvelope::EAPCAEnvelope(const std::shared_ptr<Config> &config,
 #endif
 
           subsegment_lengths_.insert(subsegment_lengths_.end(),
-                                     config->vertical_split_nsubsegment_ - 1,
+                                     config.vertical_split_nsubsegment_ - 1,
                                      subsubsegment_length);
           subsegment_lengths_.push_back(last_subsubsegment_length);
         }
       } else {
-        segment_lengths_.push_back(parent_eapca_envelope->segment_lengths_[segment_id]);
+        segment_lengths_.push_back(parent_eapca_envelope.segment_lengths_[segment_id]);
 
-        for (ID_TYPE subsegment_id = segment_id * config->vertical_split_nsubsegment_;
-             subsegment_id < (segment_id + 1) * config->vertical_split_nsubsegment_;
+        for (ID_TYPE subsegment_id = segment_id * config.vertical_split_nsubsegment_;
+             subsegment_id < (segment_id + 1) * config.vertical_split_nsubsegment_;
              ++subsegment_id) {
-          subsegment_lengths_.push_back(parent_eapca_envelope->subsegment_lengths_[subsegment_id]);
+          subsegment_lengths_.push_back(parent_eapca_envelope.subsegment_lengths_[subsegment_id]);
         }
       }
     }
   } else {
-    nsegment_ = parent_eapca_envelope->nsegment_;
-    nsubsegment_ = parent_eapca_envelope->nsubsegment_;
+    nsegment_ = parent_eapca_envelope.nsegment_;
+    nsubsegment_ = parent_eapca_envelope.nsubsegment_;
 
-    segment_lengths_ = parent_eapca_envelope->segment_lengths_;
-    subsegment_lengths_ = parent_eapca_envelope->subsegment_lengths_;
+    segment_lengths_ = parent_eapca_envelope.segment_lengths_;
+    subsegment_lengths_ = parent_eapca_envelope.subsegment_lengths_;
   }
 
 #ifdef DEBUG
 #ifndef DEBUGGED
   if (logger != nullptr) {
-    MALAT_LOG(logger->logger, trivial::debug) << boost::format("nsegment_ = %d, segment_lengths_.size() = %d")
+    MALAT_LOG(logger.logger, trivial::debug) << boost::format("nsegment_ = %d, segment_lengths_.size() = %d")
           % nsegment_ % segment_lengths_.size();
-    MALAT_LOG(logger->logger, trivial::debug) << boost::format("nsubsegment_ = %d, subsegment_lengths_.size() = %d")
+    MALAT_LOG(logger.logger, trivial::debug) << boost::format("nsubsegment_ = %d, subsegment_lengths_.size() = %d")
           % nsubsegment_ % subsegment_lengths_.size();
   }
 #endif
@@ -336,12 +336,12 @@ RESPONSE dstree::EAPCAEnvelope::initialize_stats() {
   return SUCCESS;
 }
 
-RESPONSE dstree::EAPCAEnvelope::update(const std::shared_ptr<dstree::EAPCA> &series_eapca) {
-  if (nsegment_ == series_eapca->nsegment_ && nsubsegment_ == series_eapca->nsubsegment_) {
-    auto mean_iter = series_eapca->segment_means_.cbegin();
-    auto std_iter = series_eapca->segment_stds_.cbegin();
+RESPONSE dstree::EAPCAEnvelope::update(const dstree::EAPCA &series_eapca) {
+  if (nsegment_ == series_eapca.nsegment_ && nsubsegment_ == series_eapca.nsubsegment_) {
+    auto mean_iter = series_eapca.segment_means_.cbegin();
+    auto std_iter = series_eapca.segment_stds_.cbegin();
 
-    for (ID_TYPE i = 0; i < series_eapca->nsegment_; ++i, ++mean_iter, ++std_iter) {
+    for (ID_TYPE i = 0; i < series_eapca.nsegment_; ++i, ++mean_iter, ++std_iter) {
       if (segment_min_means_[i] > *mean_iter) {
         segment_min_means_[i] = *mean_iter;
       } else if (segment_max_means_[i] < *mean_iter) {
@@ -355,10 +355,10 @@ RESPONSE dstree::EAPCAEnvelope::update(const std::shared_ptr<dstree::EAPCA> &ser
       }
     }
 
-    mean_iter = series_eapca->subsegment_means_.cbegin();
-    std_iter = series_eapca->subsegment_stds_.cbegin();
+    mean_iter = series_eapca.subsegment_means_.cbegin();
+    std_iter = series_eapca.subsegment_stds_.cbegin();
 
-    for (ID_TYPE i = 0; i < series_eapca->nsubsegment_; ++i, ++mean_iter, ++std_iter) {
+    for (ID_TYPE i = 0; i < series_eapca.nsubsegment_; ++i, ++mean_iter, ++std_iter) {
       if (subsegment_min_means_[i] > *mean_iter) {
         subsegment_min_means_[i] = *mean_iter;
       } else if (subsegment_max_means_[i] < *mean_iter) {
@@ -379,7 +379,7 @@ RESPONSE dstree::EAPCAEnvelope::update(const std::shared_ptr<dstree::EAPCA> &ser
 }
 
 VALUE_TYPE dstree::EAPCAEnvelope::cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr,
-                                                           const std::shared_ptr<upcite::Logger> &logger) const {
+                                                           const upcite::Logger &logger) const {
   VALUE_TYPE lowe_bound_distance = 0;
 
   VALUE_TYPE mean_diff, std_diff;

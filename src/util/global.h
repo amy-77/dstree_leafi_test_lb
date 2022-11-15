@@ -29,6 +29,8 @@ const VALUE_TYPE EPSILON = 1e-5;
 const VALUE_TYPE MIN_VALUE = -1e5;
 const VALUE_TYPE MAX_VALUE = 1e5;
 
+const ID_TYPE STR_DEFAULT_SIZE = 65536;
+
 }
 }
 

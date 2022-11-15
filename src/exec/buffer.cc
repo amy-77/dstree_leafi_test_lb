@@ -16,13 +16,13 @@ namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
 
-dstree::Buffer::Buffer(std::shared_ptr<upcite::Logger> logger,
+dstree::Buffer::Buffer(upcite::Logger &logger,
                        bool is_on_disk,
                        ID_TYPE capacity,
                        ID_TYPE series_length,
                        VALUE_TYPE *global_buffer,
                        std::string filepath) :
-    logger_(std::move(logger)),
+    logger_(logger),
     is_on_disk_(is_on_disk),
     capacity_(capacity),
     series_length_(series_length),
@@ -48,7 +48,7 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
       local_buffer_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), local_buffer_nbytes));
 
       if (!fs::exists(filepath_)) {
-        MALAT_LOG(logger_->logger, trivial::error) << boost::format(
+        MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
               "node file does not exist %s")
               % filepath_;
 
@@ -57,7 +57,7 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
 
       std::ifstream fin(filepath_, std::ios::in | std::ios::binary);
       if (!fin.good()) {
-        MALAT_LOG(logger_->logger, trivial::error) << boost::format(
+        MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
               "node file cannot open %s")
               % filepath_;
 
@@ -67,7 +67,7 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
       fin.read(reinterpret_cast<char *>(local_buffer_), local_buffer_nbytes);
 
       if (fin.fail()) {
-        MALAT_LOG(logger_->logger, trivial::error) << boost::format(
+        MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
               "node buffer cannot read %d bytes from %s")
               % local_buffer_nbytes
               % filepath_;
@@ -101,8 +101,8 @@ RESPONSE dstree::Buffer::reset() {
   return SUCCESS;
 }
 
-RESPONSE dstree::Buffer::insert(ID_TYPE offset,
-                                const std::shared_ptr<upcite::Logger> &logger) {
+RESPONSE dstree::Buffer::insert(ID_TYPE offset) {
+//                                const std::shared_ptr<upcite::Logger> &logger) {
   // TODO explicitly managing ID_TYPE * resulted in unexpected change of values in the middle
   offsets_.push_back(offset);
   size_ += 1;
@@ -159,20 +159,21 @@ RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
   return SUCCESS;
 }
 
-dstree::BufferManager::BufferManager(std::shared_ptr<dstree::Config> config, std::shared_ptr<upcite::Logger> logger) :
-    config_(std::move(config)),
-    logger_(std::move(logger)),
+dstree::BufferManager::BufferManager(dstree::Config &config,
+                                     upcite::Logger &logger) :
+    config_(config),
+    logger_(logger),
     batch_series_offset_(0),
     loaded_nseries_(0),
     batch_flush_buffer_(nullptr) {
-  batch_nseries_ = config_->batch_load_nseries_;
-  auto batch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_->series_length_ * batch_nseries_;
+  batch_nseries_ = config.batch_load_nseries_;
+  auto batch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config.series_length_ * batch_nseries_;
   batch_load_buffer_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), batch_nbytes));
 
-  node_buffers_.reserve(config_->default_nbuffer_);
+  node_buffers_.reserve(config.default_nbuffer_);
 
-  node_to_buffer_.reserve(config_->default_nbuffer_);
-  buffer_to_node_.reserve(config_->default_nbuffer_);
+  node_to_buffer_.reserve(config.default_nbuffer_);
+  buffer_to_node_.reserve(config.default_nbuffer_);
 }
 
 dstree::BufferManager::~BufferManager() {
@@ -191,60 +192,60 @@ dstree::BufferManager::~BufferManager() {
   }
 }
 
-std::shared_ptr<dstree::Buffer> dstree::BufferManager::create_node_buffer(ID_TYPE node_id) {
+dstree::Buffer &dstree::BufferManager::create_node_buffer(ID_TYPE node_id) {
   auto buffer_id = static_cast<ID_TYPE>(node_buffers_.size());
-  std::string buffer_filepath = config_->index_persist_folderpath_ + std::to_string(node_id) +
-      config_->index_persist_file_postfix_;
+  std::string buffer_filepath = config_.get().index_persist_folderpath_ + std::to_string(node_id) +
+      config_.get().index_persist_file_postfix_;
 
-  node_buffers_.push_back(std::make_shared<dstree::Buffer>(
+  node_buffers_.emplace_back(std::make_unique<dstree::Buffer>(
       logger_,
-      config_->on_disk_,
-      config_->leaf_max_nseries_,
-      config_->series_length_,
+      config_.get().on_disk_,
+      config_.get().leaf_max_nseries_,
+      config_.get().series_length_,
       batch_load_buffer_,
       buffer_filepath));
 
   node_to_buffer_[node_id] = buffer_id;
   buffer_to_node_[buffer_id] = node_id;
 
-  return node_buffers_[buffer_id];
+  return *node_buffers_[buffer_id];
 }
 
 RESPONSE dstree::BufferManager::load_batch() {
   if (loaded_nseries_ == 0) {
-    if (!fs::exists(config_->db_filepath_)) {
-      MALAT_LOG(logger_->logger, trivial::error)
-        << boost::format("database filepath does not exist = %s") % config_->db_filepath_;
+    if (!fs::exists(config_.get().db_filepath_)) {
+      MALAT_LOG(logger_.get().logger, trivial::error)
+        << boost::format("database filepath does not exist = %s") % config_.get().db_filepath_;
 
       return FAILURE;
     }
 
-    db_fin_.open(config_->db_filepath_, std::ios::in | std::ios::binary);
+    db_fin_.open(config_.get().db_filepath_, std::ios::in | std::ios::binary);
     if (!db_fin_.good()) {
-      MALAT_LOG(logger_->logger, trivial::error)
-        << boost::format("database filepath cannot open = %s") % config_->db_filepath_;
+      MALAT_LOG(logger_.get().logger, trivial::error)
+        << boost::format("database filepath cannot open = %s") % config_.get().db_filepath_;
 
       return FAILURE;
     }
-  } else if (loaded_nseries_ >= config_->db_nseries_) {
+  } else if (loaded_nseries_ >= config_.get().db_nseries_) {
     return FAILURE;
   }
 
-  if (loaded_nseries_ + config_->batch_load_nseries_ > config_->db_nseries_) {
-    batch_nseries_ = config_->db_nseries_ - loaded_nseries_;
+  if (loaded_nseries_ + config_.get().batch_load_nseries_ > config_.get().db_nseries_) {
+    batch_nseries_ = config_.get().db_nseries_ - loaded_nseries_;
   }
-  auto batch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_->series_length_ * batch_nseries_;
+  auto batch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * batch_nseries_;
 
   batch_series_offset_ = loaded_nseries_;
-  auto batch_bytes_offset = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_->series_length_ * batch_series_offset_;
+  auto batch_bytes_offset = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * batch_series_offset_;
 
   db_fin_.seekg(batch_bytes_offset);
   db_fin_.read(reinterpret_cast<char *>(batch_load_buffer_), batch_nbytes);
 
   if (db_fin_.fail()) {
-    MALAT_LOG(logger_->logger, trivial::error) << boost::format(
+    MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
           "cannot read %d bytes from %s at %d")
-          % config_->db_filepath_
+          % config_.get().db_filepath_
           % batch_nbytes
           % batch_bytes_offset;
 
@@ -259,12 +260,12 @@ RESPONSE dstree::BufferManager::load_batch() {
 RESPONSE dstree::BufferManager::flush() {
   if (batch_flush_buffer_ == nullptr) {
     auto batch_flush_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) *
-        config_->series_length_ * config_->leaf_max_nseries_;
+        config_.get().series_length_ * config_.get().leaf_max_nseries_;
     batch_flush_buffer_ = static_cast<VALUE_TYPE *>(std::malloc(batch_flush_nbytes));
   }
 
   for (const auto &buffer : node_buffers_) {
-    buffer->flush(batch_load_buffer_, batch_flush_buffer_, config_->series_length_);
+    buffer->flush(batch_load_buffer_, batch_flush_buffer_, config_.get().series_length_);
   }
 
   return SUCCESS;

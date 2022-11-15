@@ -21,7 +21,7 @@ namespace dstree {
 
 class Buffer {
  public:
-  Buffer(std::shared_ptr<upcite::Logger> logger,
+  Buffer(upcite::Logger &logger,
          bool is_on_disk,
          ID_TYPE capacity,
          ID_TYPE series_length,
@@ -29,23 +29,28 @@ class Buffer {
          std::string filepath);
   ~Buffer();
 
-  RESPONSE insert(ID_TYPE offset,
-                  const std::shared_ptr<upcite::Logger> &logger);
+  RESPONSE insert(ID_TYPE offset);
   RESPONSE flush(VALUE_TYPE *load_buffer,
                  VALUE_TYPE *flush_buffer,
                  ID_TYPE series_length);
   RESPONSE clean(bool if_remove_cache = false);
 
-  ID_TYPE get_offset(ID_TYPE node_series_id) const { return offsets_[node_series_id]; }
+  ID_TYPE get_offset(ID_TYPE node_series_id) const {
+    return offsets_[node_series_id];
+  }
 
   const VALUE_TYPE *get_next_series_ptr();
   RESPONSE reset();
 
-  bool is_full() const { return capacity_ > 0 && offsets_.size() == capacity_; }
-  ID_TYPE size() const { return size_; }
+  bool is_full() const {
+    return capacity_ > 0 && offsets_.size() == capacity_;
+  }
+  ID_TYPE size() const {
+    return size_;
+  }
 
  private:
-  std::shared_ptr<upcite::Logger> logger_;
+  std::reference_wrapper<upcite::Logger> logger_;
 
   bool is_on_disk_;
   ID_TYPE capacity_, size_;
@@ -61,36 +66,40 @@ class Buffer {
 
 class BufferManager {
  public:
-  BufferManager(std::shared_ptr<Config> config,
-                std::shared_ptr<upcite::Logger> logger);
+  BufferManager(Config &config,
+                upcite::Logger &logger);
   ~BufferManager();
 
   RESPONSE load_batch();
 
-  VALUE_TYPE *get_series_ptr(ID_TYPE series_batch_id) {
-    return batch_load_buffer_ + config_->series_length_ * series_batch_id;
+  VALUE_TYPE *get_series_ptr(ID_TYPE series_batch_id) const {
+    return batch_load_buffer_ + config_.get().series_length_ * series_batch_id;
+  }
+
+  EAPCA &get_series_eapca(ID_TYPE series_batch_id) const {
+    return *batch_eapca_[series_batch_id];
   }
 
   ID_TYPE load_buffer_size() const { return batch_nseries_; }
-  bool is_fully_loaded() const { return loaded_nseries_ == config_->db_nseries_; }
+  bool is_fully_loaded() const { return loaded_nseries_ == config_.get().db_nseries_; }
 
   RESPONSE flush();
   RESPONSE clean(bool if_remove_cache = false);
 
-  std::shared_ptr<Buffer> create_node_buffer(ID_TYPE node_id);
+  Buffer &create_node_buffer(ID_TYPE node_id);
 
   VALUE_TYPE *batch_load_buffer_;
-  std::vector<std::shared_ptr<EAPCA>> batch_eapca_;
+  std::vector<std::unique_ptr<EAPCA>> batch_eapca_;
 
  private:
-  std::shared_ptr<Config> config_;
-  std::shared_ptr<upcite::Logger> logger_;
+  std::reference_wrapper<Config> config_;
+  std::reference_wrapper<upcite::Logger> logger_;
 
   ID_TYPE batch_series_offset_, batch_nseries_, loaded_nseries_;
   std::ifstream db_fin_;
   VALUE_TYPE *batch_flush_buffer_;
 
-  std::vector<std::shared_ptr<Buffer>> node_buffers_;
+  std::vector<std::unique_ptr<Buffer>> node_buffers_;
   std::unordered_map<ID_TYPE, ID_TYPE> node_to_buffer_;
   std::unordered_map<ID_TYPE, ID_TYPE> buffer_to_node_;
 };

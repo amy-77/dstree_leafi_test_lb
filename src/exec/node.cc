@@ -16,34 +16,46 @@
 namespace dstree = upcite::dstree;
 namespace constant = upcite::constant;
 
-dstree::Node::Node(std::shared_ptr<dstree::Config> config,
-                   std::shared_ptr<upcite::Logger> logger,
-                   const std::unique_ptr<dstree::BufferManager> &buffer_manager,
+dstree::Node::Node(dstree::Config &config,
+                   upcite::Logger &logger,
+                   dstree::BufferManager &buffer_manager,
                    ID_TYPE depth,
-                   ID_TYPE id,
-                   const std::shared_ptr<EAPCAEnvelope> &eapca_envelope) :
-    config_(std::move(config)),
-    logger_(std::move(logger)),
+                   ID_TYPE id) :
+    config_(config),
+    logger_(logger),
     depth_(depth),
     id_(id),
+    buffer_(buffer_manager.create_node_buffer(id)),
     nseries_(0),
     neurofilter_(nullptr) {
-  buffer_ = buffer_manager->create_node_buffer(id_);
+  ;
+  split_ = std::make_unique<dstree::Split>();
+  children_.reserve(config.node_nchild_);
 
-  split_ = std::make_shared<dstree::Split>();
-  children_.reserve(config_->node_nchild_);
-
-  if (eapca_envelope == nullptr) {
-//    assert(parent == nullptr); // only root is allowed to initialize a default EAPCA envelope
-
-    eapca_envelope_ = std::make_shared<EAPCAEnvelope>(config_, 1);
-  } else {
-    eapca_envelope_ = std::make_shared<EAPCAEnvelope>(eapca_envelope);
-  }
+  eapca_envelope_ = std::make_unique<EAPCAEnvelope>(config, 1);
 }
 
-std::shared_ptr<dstree::Node> dstree::Node::route(const std::shared_ptr<dstree::EAPCA> &series_eapca) const {
-  ID_TYPE target_child_id = 0;
+dstree::Node::Node(dstree::Config &config,
+                   upcite::Logger &logger,
+                   dstree::BufferManager &buffer_manager,
+                   ID_TYPE depth,
+                   ID_TYPE id,
+                   EAPCAEnvelope &eapca_envelope) :
+    config_(config),
+    logger_(logger),
+    depth_(depth),
+    id_(id),
+    buffer_(buffer_manager.create_node_buffer(id)),
+    nseries_(0),
+    neurofilter_(nullptr) {
+  split_ = std::make_unique<dstree::Split>();
+  children_.reserve(config.node_nchild_);
+
+  eapca_envelope_ = std::make_unique<EAPCAEnvelope>(eapca_envelope);
+}
+
+dstree::Node &dstree::Node::route(dstree::EAPCA &series_eapca) const {
+  ID_TYPE target_child_id;
 
 #ifdef DEBUG
 #ifndef DEBUGGED
@@ -60,12 +72,12 @@ std::shared_ptr<dstree::Node> dstree::Node::route(const std::shared_ptr<dstree::
 #endif
 
   if (split_->is_vertical_split_) {
-    target_child_id = split_->route(series_eapca->get_subsegment_value(
+    target_child_id = split_->route(series_eapca.get_subsegment_value(
         split_->split_subsegment_id_, split_->horizontal_split_mode_ == MEAN));
 
-    series_eapca->split(config_, split_, eapca_envelope_->segment_lengths_, eapca_envelope_->subsegment_lengths_);
+    series_eapca.split(config_, *split_, eapca_envelope_->segment_lengths_, eapca_envelope_->subsegment_lengths_);
   } else {
-    target_child_id = split_->route(series_eapca->get_segment_value(
+    target_child_id = split_->route(series_eapca.get_segment_value(
         split_->split_segment_id_, split_->horizontal_split_mode_ == MEAN));
   }
 
@@ -83,11 +95,11 @@ std::shared_ptr<dstree::Node> dstree::Node::route(const std::shared_ptr<dstree::
 #endif
 #endif
 
-  return children_[target_child_id];
+  return *children_[target_child_id];
 }
 
-std::shared_ptr<dstree::Node> dstree::Node::route(const VALUE_TYPE *series_ptr) const {
-  ID_TYPE target_child_id = 0;
+dstree::Node &dstree::Node::route(const VALUE_TYPE *series_ptr) const {
+  ID_TYPE target_child_id;
 
   if (split_->horizontal_split_mode_ == MEAN) {
     target_child_id = split_->route(upcite::cal_mean(
@@ -97,10 +109,10 @@ std::shared_ptr<dstree::Node> dstree::Node::route(const VALUE_TYPE *series_ptr) 
         series_ptr + split_->split_segment_offset_, split_->split_segment_length_));
   }
 
-  return children_[target_child_id];
+  return *children_[target_child_id];
 }
 
-RESPONSE dstree::Node::enqueue_leaf(std::vector<std::shared_ptr<Node>> &leaves) {
+RESPONSE dstree::Node::enqueue_leaf(std::vector<std::reference_wrapper<Node>> &leaves) {
   // TODO lshared_from_this() failed
   // ibc++abi: terminating with uncaught exception of type std::__1::bad_weak_ptr: bad_weak_ptr
 //  if (is_leaf()) {
@@ -111,9 +123,9 @@ RESPONSE dstree::Node::enqueue_leaf(std::vector<std::shared_ptr<Node>> &leaves) 
 //    }
 //  }
 
-  for (const auto &child_node : children_) {
+  for (auto &child_node : children_) {
     if (child_node->is_leaf()) {
-      leaves.push_back(child_node);
+      leaves.push_back(std::ref(*child_node));
     } else {
       child_node->enqueue_leaf(leaves);
     }
@@ -123,9 +135,9 @@ RESPONSE dstree::Node::enqueue_leaf(std::vector<std::shared_ptr<Node>> &leaves) 
 }
 
 RESPONSE dstree::Node::insert(ID_TYPE series_id,
-                              const std::shared_ptr<dstree::EAPCA> &series_eapca) {
+                              dstree::EAPCA &series_eapca) {
   // TODO optimize RESPONSE operators
-  RESPONSE response = buffer_->insert(series_id, logger_);
+  RESPONSE response = buffer_.get().insert(series_id);
 
 #ifdef DEBUG
 #ifndef DEBUGGED
@@ -179,15 +191,14 @@ RESPONSE dstree::Node::insert(ID_TYPE series_id,
   return response;
 }
 
-RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
-                             const std::unique_ptr<dstree::BufferManager> &buffer_manager,
+RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
                              ID_TYPE first_child_id) {
-  std::shared_ptr<dstree::Split> current_split = std::make_shared<dstree::Split>();
+  std::unique_ptr<dstree::Split> current_split = std::make_unique<dstree::Split>();
   VALUE_TYPE mean_width, max_std, min_mean, min_std;
   VALUE_TYPE mean_width_children, std_width_children, max_std_child;
   VALUE_TYPE range_parent, range_children;
   VALUE_TYPE quality_gain, best_so_far_quality_gain = constant::MIN_VALUE, best_so_far_quality_gain_vertical;
-  VALUE_TYPE segment_length, subsegment_length, nchild = static_cast<VALUE_TYPE>(config_->node_nchild_);
+  VALUE_TYPE segment_length, subsegment_length, nchild = static_cast<VALUE_TYPE>(config_.get().node_nchild_);
 
   ID_TYPE segment_id, subsegment_id, child_id;
   for (segment_id = 0; segment_id < eapca_envelope_->nsegment_; ++segment_id) {
@@ -205,7 +216,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
     mean_width_children = mean_width / nchild;
     range_children = 0;
 
-    for (child_id = 0; child_id < config_->node_nchild_; ++child_id) {
+    for (child_id = 0; child_id < config_.get().node_nchild_; ++child_id) {
       range_children += segment_length * (mean_width_children * mean_width_children + max_std * max_std);
     }
 
@@ -232,11 +243,11 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 
     if (quality_gain > best_so_far_quality_gain) {
       best_so_far_quality_gain = quality_gain;
-      best_so_far_quality_gain_vertical = best_so_far_quality_gain * config_->vertical_split_gain_tradeoff_factor_;
+      best_so_far_quality_gain_vertical = best_so_far_quality_gain * config_.get().vertical_split_gain_tradeoff_factor_;
 
       min_mean = eapca_envelope_->segment_min_means_[segment_id];
       current_split->horizontal_breakpoints_.clear();
-      for (child_id = 1; child_id < config_->node_nchild_; ++child_id) {
+      for (child_id = 1; child_id < config_.get().node_nchild_; ++child_id) {
         current_split->horizontal_breakpoints_.push_back(
             min_mean + mean_width_children * static_cast<VALUE_TYPE>(child_id));
       }
@@ -262,7 +273,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
     std_width_children = (max_std - eapca_envelope_->segment_min_stds_[segment_id]) / nchild;
     range_children = 0;
 
-    for (child_id = 0; child_id < config_->node_nchild_; ++child_id) {
+    for (child_id = 0; child_id < config_.get().node_nchild_; ++child_id) {
       max_std_child = max_std - std_width_children * static_cast<VALUE_TYPE>(child_id);
       range_children += segment_length * (mean_width * mean_width + max_std_child * max_std_child);
     }
@@ -290,11 +301,11 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 
     if (quality_gain > best_so_far_quality_gain) {
       best_so_far_quality_gain = quality_gain;
-      best_so_far_quality_gain_vertical = best_so_far_quality_gain * config_->vertical_split_gain_tradeoff_factor_;
+      best_so_far_quality_gain_vertical = best_so_far_quality_gain * config_.get().vertical_split_gain_tradeoff_factor_;
 
       min_std = eapca_envelope_->segment_min_stds_[segment_id];
       current_split->horizontal_breakpoints_.clear();
-      for (child_id = 1; child_id < config_->node_nchild_; ++child_id) {
+      for (child_id = 1; child_id < config_.get().node_nchild_; ++child_id) {
         current_split->horizontal_breakpoints_.push_back(
             min_std + std_width_children * static_cast<VALUE_TYPE>(child_id));
       }
@@ -318,8 +329,8 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 
     current_split->is_vertical_split_ = true;
 
-    for (subsegment_id = segment_id * config_->vertical_split_nsubsegment_;
-         subsegment_id < (segment_id + 1) * config_->vertical_split_nsubsegment_;
+    for (subsegment_id = segment_id * config_.get().vertical_split_nsubsegment_;
+         subsegment_id < (segment_id + 1) * config_.get().vertical_split_nsubsegment_;
          ++subsegment_id) {
       current_split->split_subsegment_id_ = subsegment_id;
 
@@ -334,7 +345,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
       mean_width_children = mean_width / nchild;
       range_children = 0;
 
-      for (child_id = 0; child_id < config_->node_nchild_; ++child_id) {
+      for (child_id = 0; child_id < config_.get().node_nchild_; ++child_id) {
         range_children += subsegment_length * (mean_width_children * mean_width_children + max_std * max_std);
       }
 
@@ -361,11 +372,12 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 
       if (quality_gain > best_so_far_quality_gain_vertical) {
         best_so_far_quality_gain_vertical = quality_gain;
-        best_so_far_quality_gain = best_so_far_quality_gain_vertical / config_->vertical_split_gain_tradeoff_factor_;
+        best_so_far_quality_gain =
+            best_so_far_quality_gain_vertical / config_.get().vertical_split_gain_tradeoff_factor_;
 
         min_mean = eapca_envelope_->subsegment_min_means_[subsegment_id];
         current_split->horizontal_breakpoints_.clear();
-        for (child_id = 1; child_id < config_->node_nchild_; ++child_id) {
+        for (child_id = 1; child_id < config_.get().node_nchild_; ++child_id) {
           current_split->horizontal_breakpoints_.push_back(
               min_mean + mean_width_children * static_cast<VALUE_TYPE>(child_id));
         }
@@ -391,7 +403,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
       std_width_children = (max_std - eapca_envelope_->subsegment_min_stds_[subsegment_id]) / nchild;
       range_children = 0;
 
-      for (child_id = 0; child_id < config_->node_nchild_; ++child_id) {
+      for (child_id = 0; child_id < config_.get().node_nchild_; ++child_id) {
         max_std_child = max_std - std_width_children * static_cast<VALUE_TYPE>(child_id);
         range_children += subsegment_length * (mean_width * mean_width + max_std_child * max_std_child);
       }
@@ -419,11 +431,12 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 
       if (quality_gain > best_so_far_quality_gain_vertical) {
         best_so_far_quality_gain_vertical = quality_gain;
-        best_so_far_quality_gain = best_so_far_quality_gain_vertical / config_->vertical_split_gain_tradeoff_factor_;
+        best_so_far_quality_gain =
+            best_so_far_quality_gain_vertical / config_.get().vertical_split_gain_tradeoff_factor_;
 
         min_std = eapca_envelope_->subsegment_min_stds_[subsegment_id];
         current_split->horizontal_breakpoints_.clear();
-        for (child_id = 1; child_id < config_->node_nchild_; ++child_id) {
+        for (child_id = 1; child_id < config_.get().node_nchild_; ++child_id) {
           current_split->horizontal_breakpoints_.push_back(
               min_std + std_width_children * static_cast<VALUE_TYPE>(child_id));
         }
@@ -465,12 +478,12 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
   // TODO libc++abi: terminating with uncaught exception of type std::__1::bad_weak_ptr: bad_weak_ptr
 //  std::shared_ptr<dstree::Node> parent = shared_from_this();
 
-  std::shared_ptr<dstree::EAPCAEnvelope> child_eapca_envelope = std::make_shared<dstree::EAPCAEnvelope>(
-      config, eapca_envelope_, split_, logger_);
+  dstree::EAPCAEnvelope child_eapca_envelope(config_, *eapca_envelope_, *split_, logger_);
 
-  for (child_id = 0; child_id < config_->node_nchild_; ++child_id) {
-    children_.push_back(std::make_shared<dstree::Node>(
-        config, logger_, buffer_manager, depth_ + 1, first_child_id + child_id, child_eapca_envelope));
+  for (child_id = 0; child_id < config_.get().node_nchild_; ++child_id) {
+    children_.emplace_back(std::make_unique<dstree::Node>(config_, logger_, buffer_manager,
+                                                          depth_ + 1, first_child_id + child_id,
+                                                          child_eapca_envelope));
 
 #ifdef DEBUG
 #ifndef DEBUGGED
@@ -516,8 +529,8 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 #endif
 #endif
 
-  for (ID_TYPE node_series_id = 0; node_series_id < buffer_->size(); ++node_series_id) {
-    ID_TYPE series_batch_id = buffer_->get_offset(node_series_id);
+  for (ID_TYPE node_series_id = 0; node_series_id < buffer_.get().size(); ++node_series_id) {
+    ID_TYPE series_batch_id = buffer_.get().get_offset(node_series_id);
 
 //#ifdef DEBUG
 //#ifndef DEBUGGED
@@ -534,8 +547,8 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 //#endif
 //#endif
 
-    std::shared_ptr<dstree::Node> target_child = route(buffer_manager->batch_eapca_[series_batch_id]);
-    target_child->insert(series_batch_id, buffer_manager->batch_eapca_[series_batch_id]);
+    dstree::Node &target_child = route(buffer_manager.get_series_eapca(series_batch_id));
+    target_child.insert(series_batch_id, buffer_manager.get_series_eapca(series_batch_id));
 
 //#ifdef DEBUG
 //#ifndef DEBUGGED
@@ -558,7 +571,7 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
-  MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
+  MALAT_LOG(logger_.get().logger, trivial::debug) << boost::format(
         "parent %d, split %d-%d @ %.3f = %.3f: (%d in) %d @ %d + %d, child %d (%d == %d) + %d (%d == %d)")
         % id_
         % split_->is_vertical_split_
@@ -571,29 +584,29 @@ RESPONSE dstree::Node::split(const std::shared_ptr<dstree::Config> &config,
         % split_->split_segment_length_
         % children_[0]->id_
         % children_[0]->nseries_
-        % children_[0]->buffer_->size()
+        % children_[0]->buffer_.get().size()
         % children_[1]->id_
         % children_[1]->nseries_
-        % children_[1]->buffer_->size();
+        % children_[1]->buffer_.get().size();
 //#endif
 #endif
 
   // TODO load flushed series, calculate their EAPCA and insert into children nodes
 
-  buffer_->clean(true);
+  buffer_.get().clean(true);
   nseries_ = 0;
 
   return SUCCESS;
 }
 
 RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
-                              std::shared_ptr<dstree::Answer> &answer,
+                              dstree::Answer &answer,
                               ID_TYPE &visited_node_counter,
                               ID_TYPE &visited_series_counter) const {
-  const VALUE_TYPE *db_series_ptr = buffer_->get_next_series_ptr();
+  const VALUE_TYPE *db_series_ptr = buffer_.get().get_next_series_ptr();
 
   while (db_series_ptr != nullptr) {
-    VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_->series_length_);
+    VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_.get().series_length_);
 
 #ifdef DEBUG
 #ifndef DEBUGGED
@@ -607,22 +620,22 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 #endif
 #endif
 
-    if (answer->is_bsf(distance)) {
-      answer->push_bsf(distance);
+    if (answer.is_bsf(distance)) {
+      answer.push_bsf(distance);
 
-      MALAT_LOG(logger_->logger, trivial::info) << boost::format(
+      MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
             "query %d update bsf %f at node %d series %s")
-            % answer->query_id_
+            % answer.query_id_
             % distance
             % visited_node_counter
             % visited_series_counter;
     }
 
     visited_series_counter += 1;
-    db_series_ptr = buffer_->get_next_series_ptr();
+    db_series_ptr = buffer_.get().get_next_series_ptr();
   }
 
-  buffer_->reset();
+  buffer_.get().reset();
 
   visited_node_counter += 1;
 
@@ -632,7 +645,7 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
                                 VALUE_TYPE *m256_fetch_cache,
                                 VALUE_TYPE bsf_distance) const {
-  const VALUE_TYPE *db_series_ptr = buffer_->get_next_series_ptr();
+  const VALUE_TYPE *db_series_ptr = buffer_.get().get_next_series_ptr();
   VALUE_TYPE local_bsf = constant::MAX_VALUE;
   VALUE_TYPE distance;
 
@@ -640,26 +653,26 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 //    VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_->series_length_);
     if (bsf_distance > 0) {
       distance = upcite::cal_early_EDsquare_SIMD_8(
-          db_series_ptr, query_series_ptr, config_->series_length_, m256_fetch_cache, bsf_distance);
+          db_series_ptr, query_series_ptr, config_.get().series_length_, m256_fetch_cache, bsf_distance);
     } else {
       distance = upcite::cal_EDsquare_SIMD_8(
-          db_series_ptr, query_series_ptr, config_->series_length_, m256_fetch_cache);
+          db_series_ptr, query_series_ptr, config_.get().series_length_, m256_fetch_cache);
     }
 
     if (distance < local_bsf) {
       local_bsf = distance;
     }
 
-    db_series_ptr = buffer_->get_next_series_ptr();
+    db_series_ptr = buffer_.get().get_next_series_ptr();
   }
 
-  buffer_->reset();
+  buffer_.get().reset();
 
   return local_bsf;
 }
 
 RESPONSE dstree::Node::log() {
-  MALAT_LOG(logger_->logger, trivial::info)
+  MALAT_LOG(logger_.get().logger, trivial::info)
     << boost::format("node_id = %d, node_depth = %d, node_size = %d") % id_ % depth_ % nseries_;
 
   return SUCCESS;

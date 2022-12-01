@@ -13,7 +13,6 @@
 
 #include "global.h"
 #include "config.h"
-#include "logger.h"
 #include "model.h"
 
 namespace upcite {
@@ -21,8 +20,7 @@ namespace dstree {
 
 class Filter {
  public:
-  explicit Filter(upcite::Logger &logger,
-                  dstree::Config &config,
+  explicit Filter(dstree::Config &config,
                   ID_TYPE id,
                   std::reference_wrapper<torch::Tensor> shared_train_queries);
   ~Filter() = default;
@@ -43,7 +41,6 @@ class Filter {
  private:
   ID_TYPE id_;
 
-  std::reference_wrapper<upcite::Logger> logger_;
   std::reference_wrapper<dstree::Config> config_;
 
   std::unique_ptr<NFModel> model_;

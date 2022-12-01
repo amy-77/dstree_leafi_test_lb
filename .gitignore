@@ -92,3 +92,6 @@ cmake-build-*/
 # outputs
 *.log
 *.bkp
+
+# lib
+lib/fmt-9.1.0

@@ -8,9 +8,10 @@
 
 #include <memory>
 
+#include <torch/torch.h>
+
 #include "buffer.h"
 #include "global.h"
-#include "logger.h"
 #include "config.h"
 #include "eapca.h"
 #include "split.h"
@@ -24,12 +25,10 @@ class Node {
  public:
 //  Node() = default; // TODO check
   Node(Config &config,
-       upcite::Logger &logger,
        dstree::BufferManager &buffer_manager,
        ID_TYPE depth,
        ID_TYPE id);
   Node(Config &config,
-       upcite::Logger &logger,
        dstree::BufferManager &buffer_manager,
        ID_TYPE depth,
        ID_TYPE id,
@@ -58,7 +57,38 @@ class Node {
                     VALUE_TYPE bsf_distance = -1) const;
 
   VALUE_TYPE cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr) const {
-    return eapca_envelope_->cal_lower_bound_EDsquare(series_ptr, logger_);
+    return eapca_envelope_->cal_lower_bound_EDsquare(series_ptr);
+  }
+
+  bool has_filter() const { return neurofilter_ != nullptr; }
+  Filter &get_filter() const { return *neurofilter_; }
+  VALUE_TYPE filter_infer(torch::Tensor &query_series) const { return neurofilter_->infer(query_series); }
+
+  RESPONSE implant_filter(ID_TYPE id, std::reference_wrapper<torch::Tensor> shared_train_queries) {
+    neurofilter_ = std::make_unique<dstree::Filter>(config_, id, shared_train_queries);
+    return SUCCESS;
+  }
+
+  RESPONSE push_filter_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance) {
+    return neurofilter_->push_example(bsf_distance, nn_distance);
+  }
+
+  std::vector<std::reference_wrapper<Node>>::iterator begin() {
+    if (children_refs_.empty()) {
+      for (auto &child_node : children_) {
+        children_refs_.push_back(std::ref(*child_node));
+      }
+    }
+    return children_refs_.begin();
+  }
+
+  std::vector<std::reference_wrapper<Node>>::iterator end() {
+    if (children_refs_.empty()) {
+      for (auto &child_node : children_) {
+        children_refs_.push_back(std::ref(*child_node));
+      }
+    }
+    return children_refs_.end();
   }
 
   ID_TYPE get_id() const { return id_; }
@@ -69,25 +99,22 @@ class Node {
 
   RESPONSE log();
 
-  // TODO make private
-  std::vector<std::unique_ptr<Node>> children_;
-
-  // TODO make private
-  std::unique_ptr<Filter> neurofilter_;
-
  private:
   ID_TYPE depth_, id_;
   ID_TYPE nseries_;
 
   std::reference_wrapper<Config> config_;
-  std::reference_wrapper<upcite::Logger> logger_;
 
   std::unique_ptr<EAPCAEnvelope> eapca_envelope_;
   std::reference_wrapper<Buffer> buffer_;
 
   std::unique_ptr<Split> split_;
 //  std::shared_ptr<Node> parent_;
-//  std::vector<std::shared_ptr<Node>> children_;
+
+  std::vector<std::unique_ptr<Node>> children_;
+  std::vector<std::reference_wrapper<Node>> children_refs_; // for iterator only
+
+  std::unique_ptr<Filter> neurofilter_;
 };
 
 }

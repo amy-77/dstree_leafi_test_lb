@@ -50,14 +50,12 @@ class EAPCAEnvelope {
                 ID_TYPE nsegment);
   EAPCAEnvelope(const Config &config,
                 const EAPCAEnvelope &parent_eapca_envelope,
-                const Split &parent_split,
-                const upcite::Logger &logger);
+                const Split &parent_split);
   ~EAPCAEnvelope() = default;
 
   RESPONSE update(const dstree::EAPCA &series_eapca);
 
-  VALUE_TYPE cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr,
-                                      const upcite::Logger &logger) const;
+  VALUE_TYPE cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr) const;
   VALUE_TYPE cal_upper_bound_EDsquare(const VALUE_TYPE *series_ptr) const;
 
   EAPCAEnvelope &operator=(const EAPCAEnvelope &eapca_envelope) = default;

@@ -11,9 +11,11 @@
 #include <memory>
 #include <fstream>
 
+#include <spdlog/spdlog.h>
+
 #include "global.h"
 #include "config.h"
-#include "logger.h"
+//#include "logger.h"
 #include "eapca.h"
 
 namespace upcite {
@@ -21,8 +23,7 @@ namespace dstree {
 
 class Buffer {
  public:
-  Buffer(upcite::Logger &logger,
-         bool is_on_disk,
+  Buffer(bool is_on_disk,
          ID_TYPE capacity,
          ID_TYPE series_length,
          VALUE_TYPE *global_buffer,
@@ -35,23 +36,15 @@ class Buffer {
                  ID_TYPE series_length);
   RESPONSE clean(bool if_remove_cache = false);
 
-  ID_TYPE get_offset(ID_TYPE node_series_id) const {
-    return offsets_[node_series_id];
-  }
+  ID_TYPE get_offset(ID_TYPE node_series_id) const { return offsets_[node_series_id]; }
 
   const VALUE_TYPE *get_next_series_ptr();
   RESPONSE reset();
 
-  bool is_full() const {
-    return capacity_ > 0 && offsets_.size() == capacity_;
-  }
-  ID_TYPE size() const {
-    return size_;
-  }
+  bool is_full() const { return capacity_ > 0 && offsets_.size() == capacity_; }
+  ID_TYPE size() const { return size_; }
 
  private:
-  std::reference_wrapper<upcite::Logger> logger_;
-
   bool is_on_disk_;
   ID_TYPE capacity_, size_;
   ID_TYPE series_length_;
@@ -66,8 +59,7 @@ class Buffer {
 
 class BufferManager {
  public:
-  BufferManager(Config &config,
-                upcite::Logger &logger);
+  BufferManager(Config &config);
   ~BufferManager();
 
   RESPONSE load_batch();
@@ -93,7 +85,6 @@ class BufferManager {
 
  private:
   std::reference_wrapper<Config> config_;
-  std::reference_wrapper<upcite::Logger> logger_;
 
   ID_TYPE batch_series_offset_, batch_nseries_, loaded_nseries_;
   std::ifstream db_fin_;

@@ -21,7 +21,7 @@ namespace src = boost::log::sources;
 namespace sinks = boost::log::sinks;
 
 // cr: https://stackoverflow.com/a/31160870
-#define MALAT_LOG(log_, sv) BOOST_LOG_SEV((*log_), (sv)) \
+#define MALAT_LOG(log_, sv) BOOST_LOG_SEV((*(log_), (sv)) \
   << logging::add_value("Line", (__LINE__)) \
   << logging::add_value("File", (__FILE__)) \
   << logging::add_value("Function", (BOOST_CURRENT_FUNCTION))

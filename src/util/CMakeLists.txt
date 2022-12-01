@@ -11,5 +11,5 @@ target_compile_features(${TARGET} PRIVATE cxx_std_14)
 set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "BOOST_LOG_DYN_LINK")
 
 target_link_libraries(${TARGET}
-        PUBLIC ${Boost_LIBRARIES}  ${TORCH_LIBRARIES}
+        PUBLIC ${TORCH_LIBRARIES} ${Boost_LIBRARIES} spdlog::spdlog
         )

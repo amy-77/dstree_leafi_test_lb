@@ -32,7 +32,7 @@ class Compare {
 
 class Index {
  public:
-  Index(Config &config, upcite::Logger &logger);
+  Index(Config &config);
   ~Index();
 
   RESPONSE build();
@@ -47,15 +47,14 @@ class Index {
  private:
   RESPONSE insert(ID_TYPE batch_series_id);
 
-  RESPONSE nf_initialize(dstree::Node &node,
+  RESPONSE filter_initialize(dstree::Node &node,
                          ID_TYPE *filter_id);
-  RESPONSE nf_collect();
-  RESPONSE nf_collect_mthread();
-  RESPONSE nf_train();
-  RESPONSE nf_train_mthread();
+  RESPONSE filter_collect();
+  RESPONSE filter_collect_mthread();
+  RESPONSE filter_train();
+  RESPONSE filter_train_mthread();
 
   std::reference_wrapper<Config> config_;
-  std::reference_wrapper<upcite::Logger> logger_;
 
   std::unique_ptr<BufferManager> buffer_manager_;
 
@@ -63,9 +62,9 @@ class Index {
   ID_TYPE nnode_, nleaf_;
   std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare> leaf_min_heap_;
 
-  VALUE_TYPE *nf_train_query_ptr_;
-  torch::Tensor nf_train_query_tsr_;
-  torch::Tensor nf_query_tsr_;
+  VALUE_TYPE *filter_train_query_ptr_;
+  torch::Tensor filter_train_query_tsr_;
+  torch::Tensor filter_query_tsr_;
   std::unique_ptr<torch::Device> device_;
   std::stack<std::reference_wrapper<Filter>> filter_cache_;
 };

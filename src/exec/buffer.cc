@@ -9,20 +9,18 @@
 #include <iostream>
 #include <utility>
 
-#include <boost/format.hpp>
+//#include <boost/format.hpp>
 #include <boost/filesystem.hpp>
 
 namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
 
-dstree::Buffer::Buffer(upcite::Logger &logger,
-                       bool is_on_disk,
+dstree::Buffer::Buffer(bool is_on_disk,
                        ID_TYPE capacity,
                        ID_TYPE series_length,
                        VALUE_TYPE *global_buffer,
                        std::string filepath) :
-    logger_(logger),
     is_on_disk_(is_on_disk),
     capacity_(capacity),
     series_length_(series_length),
@@ -48,18 +46,14 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
       local_buffer_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), local_buffer_nbytes));
 
       if (!fs::exists(filepath_)) {
-        MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-              "node file does not exist %s")
-              % filepath_;
+        spdlog::error("node file {:s} does not exist", filepath_);
 
         return nullptr;
       }
 
       std::ifstream fin(filepath_, std::ios::in | std::ios::binary);
       if (!fin.good()) {
-        MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-              "node file cannot open %s")
-              % filepath_;
+        spdlog::error("node file {:s} cannot open", filepath_);
 
         return nullptr;
       }
@@ -67,10 +61,7 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
       fin.read(reinterpret_cast<char *>(local_buffer_), local_buffer_nbytes);
 
       if (fin.fail()) {
-        MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-              "node buffer cannot read %d bytes from %s")
-              % local_buffer_nbytes
-              % filepath_;
+        spdlog::error("node buffer cannot read {:d} bytes from {:s}", local_buffer_nbytes, filepath_);
 
         return nullptr;
       }
@@ -122,7 +113,8 @@ RESPONSE dstree::Buffer::insert(ID_TYPE offset) {
 
   if (size() > capacity_) {
     // TODO
-    std::cout << boost::format("%s: nseries > capacity") % fs::path(filepath_).filename().string() << std::endl;
+    spdlog::error("{:s}: nseries > capacity", fs::path(filepath_).filename().string());
+
     return FAILURE;
   }
 
@@ -159,10 +151,8 @@ RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
   return SUCCESS;
 }
 
-dstree::BufferManager::BufferManager(dstree::Config &config,
-                                     upcite::Logger &logger) :
+dstree::BufferManager::BufferManager(dstree::Config &config) :
     config_(config),
-    logger_(logger),
     batch_series_offset_(0),
     loaded_nseries_(0),
     batch_flush_buffer_(nullptr) {
@@ -198,7 +188,6 @@ dstree::Buffer &dstree::BufferManager::create_node_buffer(ID_TYPE node_id) {
       config_.get().index_persist_file_postfix_;
 
   node_buffers_.emplace_back(std::make_unique<dstree::Buffer>(
-      logger_,
       config_.get().on_disk_,
       config_.get().leaf_max_nseries_,
       config_.get().series_length_,
@@ -214,16 +203,14 @@ dstree::Buffer &dstree::BufferManager::create_node_buffer(ID_TYPE node_id) {
 RESPONSE dstree::BufferManager::load_batch() {
   if (loaded_nseries_ == 0) {
     if (!fs::exists(config_.get().db_filepath_)) {
-      MALAT_LOG(logger_.get().logger, trivial::error)
-        << boost::format("database filepath does not exist = %s") % config_.get().db_filepath_;
+      spdlog::error("database filepath does not exist = {:s}", config_.get().db_filepath_);
 
       return FAILURE;
     }
 
     db_fin_.open(config_.get().db_filepath_, std::ios::in | std::ios::binary);
     if (!db_fin_.good()) {
-      MALAT_LOG(logger_.get().logger, trivial::error)
-        << boost::format("database filepath cannot open = %s") % config_.get().db_filepath_;
+      spdlog::error("database filepath cannot open = {:s}", config_.get().db_filepath_);
 
       return FAILURE;
     }
@@ -243,11 +230,8 @@ RESPONSE dstree::BufferManager::load_batch() {
   db_fin_.read(reinterpret_cast<char *>(batch_load_buffer_), batch_nbytes);
 
   if (db_fin_.fail()) {
-    MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-          "cannot read %d bytes from %s at %d")
-          % config_.get().db_filepath_
-          % batch_nbytes
-          % batch_bytes_offset;
+    spdlog::error("cannot read {:d} bytes from {:s} at {:d}",
+                  batch_nbytes, config_.get().db_filepath_, batch_bytes_offset);
 
     return FAILURE;
   }

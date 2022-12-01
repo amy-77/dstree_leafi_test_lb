@@ -7,16 +7,18 @@
 
 #include <iostream>
 
-#include <boost/format.hpp>
+//#include <boost/format.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/log/trivial.hpp>
+//#include <boost/log/trivial.hpp>
 #include <boost/program_options.hpp>
 #include <boost/algorithm/string/predicate.hpp>
+#include <spdlog/spdlog.h>
 
-#include "logger.h"
+//#include "logger.h"
 
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
+namespace constant = upcite::constant;
 
 namespace dstree = upcite::dstree;
 
@@ -38,24 +40,24 @@ dstree::Config::Config(int argc, char *argv[]) :
     search_max_nseries_(-1),
     search_max_nnode_(-1),
     n_nearest_neighbor_(1),
-    is_ground_truth_(false),
+    examine_ground_truth_(false),
     require_neurofilter_(false),
-    nf_dim_latent_(-1),
-    nf_train_dropout_p_(0.5),
-    nf_leaky_relu_negative_slope_(0.1),
-    nf_train_is_gpu_(false),
-    nf_infer_is_gpu_(false),
-    nf_device_id_(0),
-    nf_train_nexample_(-1),
-    nf_train_batchsize_(-1),
-    nf_train_nepoch_(100),
-    nf_train_learning_rate_(0.01),
-    nf_train_min_lr_(0.0001),
-    nf_train_clip_grad_norm_type_(2),
-    nf_train_clip_grad_max_norm_(1),
-    nf_train_is_mthread_(false),
-    nf_collect_nthread_(-1),
-    nf_train_nthread_(4) {
+    filter_dim_latent_(-1),
+    filter_train_dropout_p_(0.5),
+    filter_leaky_relu_negative_slope_(0.1),
+    filter_train_is_gpu_(false),
+    filter_infer_is_gpu_(false),
+    filter_device_id_(0),
+    filter_train_nexample_(-1),
+    filter_train_batchsize_(-1),
+    filter_train_nepoch_(100),
+    filter_train_learning_rate_(0.01),
+    filter_train_min_lr_(0.0001),
+    filter_train_clip_grad_norm_type_(2),
+    filter_train_clip_grad_max_norm_(1),
+    filter_train_is_mthread_(false),
+    filter_collect_nthread_(-1),
+    filter_train_nthread_(4) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -98,43 +100,43 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Maximal number of nodes to be checked during query answering")
       ("n_nearest_neighbor", po::value<ID_TYPE>(&n_nearest_neighbor_)->default_value(1),
        "Number of nearest neighbors to be returned")
-      ("ground_truth", po::bool_switch(&is_ground_truth_)->default_value(false),
+      ("ground_truth", po::bool_switch(&examine_ground_truth_)->default_value(false),
        "Whether to fetch the ground truths, i.e., linear scan without pruning")
       ("require_neurofilter", po::bool_switch(&require_neurofilter_)->default_value(false),
        "Whether to implant neurofilters")
-      ("dim_latent", po::value<ID_TYPE>(&nf_dim_latent_),
+      ("dim_latent", po::value<ID_TYPE>(&filter_dim_latent_),
        "Dimension of neural model latent variables")
-      ("dropout_p", po::value<VALUE_TYPE>(&nf_train_dropout_p_)->default_value(0.5),
+      ("dropout_p", po::value<VALUE_TYPE>(&filter_train_dropout_p_)->default_value(0.5),
        "Dropout probability for MLP latent layer")
-      ("leaky_relu_negative_slope", po::value<VALUE_TYPE>(&nf_leaky_relu_negative_slope_)->default_value(0.1),
+      ("leaky_relu_negative_slope", po::value<VALUE_TYPE>(&filter_leaky_relu_negative_slope_)->default_value(0.1),
        "Leaky ReLU negative slope for MLP")
-      ("nf_train_is_gpu", po::bool_switch(&nf_train_is_gpu_)->default_value(false),
+      ("filter_train_is_gpu", po::bool_switch(&filter_train_is_gpu_)->default_value(false),
        "Whether to train neurofilters on GPU (other on CPU)")
-      ("nf_infer_is_gpu", po::bool_switch(&nf_infer_is_gpu_)->default_value(false),
+      ("filter_infer_is_gpu", po::bool_switch(&filter_infer_is_gpu_)->default_value(false),
        "Whether to run neurofilters on GPU (other on CPU)")
-      ("device_id", po::value<ID_TYPE>(&nf_device_id_)->default_value(0),
+      ("device_id", po::value<ID_TYPE>(&filter_device_id_)->default_value(0),
        "GPU device id")
-      ("nf_train_nexample", po::value<ID_TYPE>(&nf_train_nexample_),
+      ("filter_train_nexample", po::value<ID_TYPE>(&filter_train_nexample_),
        "Number of train examples for neurofilters")
-      ("nf_train_batchsize", po::value<ID_TYPE>(&nf_train_batchsize_)->default_value(-1),
+      ("filter_train_batchsize", po::value<ID_TYPE>(&filter_train_batchsize_)->default_value(-1),
        "Neurofilter train batch size")
-      ("nf_train_nepoch", po::value<ID_TYPE>(&nf_train_nepoch_)->default_value(100),
+      ("filter_train_nepoch", po::value<ID_TYPE>(&filter_train_nepoch_)->default_value(100),
        "Neurofilter train (maximal) number of epochs")
-      ("learning_rate", po::value<VALUE_TYPE>(&nf_train_learning_rate_)->default_value(0.01),
+      ("learning_rate", po::value<VALUE_TYPE>(&filter_train_learning_rate_)->default_value(0.01),
        "Neurofilter train learning rate")
-      ("nf_train_min_lr", po::value<VALUE_TYPE>(&nf_train_min_lr_)->default_value(0.0001),
+      ("filter_train_min_lr", po::value<VALUE_TYPE>(&filter_train_min_lr_)->default_value(0.0001),
        "Neurofilter train minimal learning rate, for adjusting learning rates")
-      ("clip_grad_norm_type", po::value<VALUE_TYPE>(&nf_train_clip_grad_norm_type_)->default_value(2),
+      ("clip_grad_norm_type", po::value<VALUE_TYPE>(&filter_train_clip_grad_norm_type_)->default_value(2),
        "Gradient clipping norm type")
-      ("clip_grad_max_norm", po::value<VALUE_TYPE>(&nf_train_clip_grad_max_norm_)->default_value(1),
+      ("clip_grad_max_norm", po::value<VALUE_TYPE>(&filter_train_clip_grad_max_norm_)->default_value(1),
        "Gradient clipping max norm")
-      ("nf_query_filepath", po::value<std::string>(&nf_query_filepath_),
+      ("filter_query_filepath", po::value<std::string>(&filter_query_filepath_),
        "Query file path to train neurofilters")
-      ("nf_train_mthread", po::bool_switch(&nf_train_is_mthread_)->default_value(false),
+      ("filter_train_mthread", po::bool_switch(&filter_train_is_mthread_)->default_value(false),
        "Whether to train neurofilters multithreadingly")
-      ("nf_collect_nthread", po::value<ID_TYPE>(&nf_collect_nthread_)->default_value(-1),
-       "Number of threads to collect neurofilter train set; default nf_train_nthread")
-      ("nf_train_nthread", po::value<ID_TYPE>(&nf_train_nthread_)->default_value(4),
+      ("filter_collect_nthread", po::value<ID_TYPE>(&filter_collect_nthread_)->default_value(-1),
+       "Number of threads to collect neurofilter train set; default filter_train_nthread")
+      ("filter_train_nthread", po::value<ID_TYPE>(&filter_train_nthread_)->default_value(4),
        "Number of threads to train neurofilters");
 
   po::variables_map vm;
@@ -187,157 +189,161 @@ dstree::Config::Config(int argc, char *argv[]) :
   }
 
   if (require_neurofilter_) {
-    if (nf_dim_latent_ < 0) {
-      nf_dim_latent_ = series_length_;
+    if (filter_dim_latent_ < 0) {
+      filter_dim_latent_ = series_length_;
     }
 
-    if (nf_train_nexample_ < 0) {
+    if (filter_train_nexample_ < 0) {
       std::cout << "Please specify the number of neurofilter train examples by setting --neurofilter_train_nexample"
                 << std::endl;
       exit(-1);
     }
 
-    if (nf_train_batchsize_ < 0) {
-      nf_train_batchsize_ = nf_train_nexample_;
+    if (filter_train_batchsize_ < 0) {
+      filter_train_batchsize_ = filter_train_nexample_;
     }
 
-    if (vm.count("nf_infer_is_gpu") < 1) {
-      nf_infer_is_gpu_ = nf_train_is_gpu_;
+    if (vm.count("filter_infer_is_gpu") < 1) {
+      filter_infer_is_gpu_ = filter_train_is_gpu_;
     }
 
     if (vm.count("dim_latent") < 1) {
-      nf_dim_latent_ = series_length_;
+      filter_dim_latent_ = series_length_;
     }
 
-    if (nf_train_is_mthread_) {
-      if (nf_collect_nthread_ < 0) {
-        nf_collect_nthread_ = nf_train_nthread_;
+    if (filter_train_is_mthread_) {
+      if (filter_collect_nthread_ < 0) {
+        filter_collect_nthread_ = filter_train_nthread_;
       }
     }
   }
 }
 
-void dstree::Config::log(upcite::Logger &logger) {
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "db_filepath = %s")
-        % db_filepath_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "query_filepath = %s")
-        % query_filepath_;
+void dstree::Config::log() {
+  spdlog::info("db_filepath = {:s}", db_filepath_);
+  spdlog::info("query_filepath = {:s}", query_filepath_);
+  spdlog::info("is_znormalized = {:b}", is_znormalized_);
 
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "is_znormalized = %d")
-        % is_znormalized_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "db_size = %d")
-        % db_nseries_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "query_size = %d")
-        % query_nseries_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "leaf_size = %d")
-        % leaf_max_nseries_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "batch_load_nseries = %d")
-        % batch_load_nseries_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "default_nbuffer = %d")
-        % default_nbuffer_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "on_disk = %d")
-        % on_disk_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "index_persist_folderpath = %s")
-        % index_persist_folderpath_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "index_persist_file_postfix = %s")
-        % index_persist_file_postfix_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "node_nchild = %d")
-        % node_nchild_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "vertical_split_nsubsegment = %d")
-        % vertical_split_nsubsegment_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "vertical_split_gain_tradeoff_factor = %.3f")
-        % vertical_split_gain_tradeoff_factor_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "is_exact_search = %d")
-        % is_exact_search_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "search_max_nseries = %d")
-        % search_max_nseries_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "search_max_nnode = %d")
-        % search_max_nnode_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "n_nearest_neighbor = %d")
-        % n_nearest_neighbor_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "is_ground_truth = %d")
-        % is_ground_truth_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "require_neurofilter = %d")
-        % require_neurofilter_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_dim_latent = %d")
-        % nf_dim_latent_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_leaky_relu_negative_slope = %.3f")
-        % nf_leaky_relu_negative_slope_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_dropout_p = %.3f")
-        % nf_train_dropout_p_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_is_gpu = %d")
-        % nf_train_is_gpu_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_infer_is_gpu = %d")
-        % nf_infer_is_gpu_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_device_id = %d")
-        % nf_device_id_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_nexample = %d")
-        % nf_train_nexample_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_batchsize = %d")
-        % nf_train_batchsize_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_nepoch = %d")
-        % nf_train_nepoch_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_learning_rate = %.3f")
-        % nf_train_learning_rate_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_min_lr = %.3f")
-        % nf_train_min_lr_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_clip_grad_norm_type = %.3f")
-        % nf_train_clip_grad_norm_type_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_clip_grad_max_norm = %.3f")
-        % nf_train_clip_grad_max_norm_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_query_filepath = %s")
-        % nf_query_filepath_;
-
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_mthread = %d")
-        % nf_train_is_mthread_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_collect_nthread = %d")
-        % nf_collect_nthread_;
-  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-        "nf_train_nthread = %d")
-        % nf_train_nthread_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "db_filepath = %s")
+//        % db_filepath_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "query_filepath = %s")
+//        % query_filepath_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "is_znormalized = %d")
+//        % is_znormalized_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "db_size = %d")
+//        % db_nseries_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "query_size = %d")
+//        % query_nseries_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "leaf_size = %d")
+//        % leaf_max_nseries_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "batch_load_nseries = %d")
+//        % batch_load_nseries_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "default_nbuffer = %d")
+//        % default_nbuffer_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "on_disk = %d")
+//        % on_disk_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "index_persist_folderpath = %s")
+//        % index_persist_folderpath_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "index_persist_file_postfix = %s")
+//        % index_persist_file_postfix_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "node_nchild = %d")
+//        % node_nchild_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "vertical_split_nsubsegment = %d")
+//        % vertical_split_nsubsegment_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "vertical_split_gain_tradeoff_factor = %.3f")
+//        % vertical_split_gain_tradeoff_factor_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "is_exact_search = %d")
+//        % is_exact_search_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "search_max_nseries = %d")
+//        % search_max_nseries_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "search_max_nnode = %d")
+//        % search_max_nnode_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "n_nearest_neighbor = %d")
+//        % n_nearest_neighbor_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "is_ground_truth = %d")
+//        % examine_ground_truth_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "require_neurofilter = %d")
+//        % require_neurofilter_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_dim_latent = %d")
+//        % filter_dim_latent_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_leaky_relu_negative_slope = %.3f")
+//        % filter_leaky_relu_negative_slope_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_dropout_p = %.3f")
+//        % filter_train_dropout_p_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_is_gpu = %d")
+//        % filter_train_is_gpu_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_infer_is_gpu = %d")
+//        % filter_infer_is_gpu_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_device_id = %d")
+//        % filter_device_id_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_nexample = %d")
+//        % filter_train_nexample_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_batchsize = %d")
+//        % filter_train_batchsize_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_nepoch = %d")
+//        % filter_train_nepoch_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_learning_rate = %.3f")
+//        % filter_train_learning_rate_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_min_lr = %.3f")
+//        % filter_train_min_lr_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_clip_grad_norm_type = %.3f")
+//        % filter_train_clip_grad_norm_type_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_clip_grad_max_norm = %.3f")
+//        % filter_train_clip_grad_max_norm_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_query_filepath = %s")
+//        % filter_query_filepath_;
+//
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_mthread = %d")
+//        % filter_train_is_mthread_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_collect_nthread = %d")
+//        % filter_collect_nthread_;
+//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
+//        "filter_train_nthread = %d")
+//        % filter_train_nthread_;
 }

@@ -21,7 +21,7 @@ class Config {
   Config(int argc, char *argv[]);
   ~Config() = default;
 
-  void log(upcite::Logger &logger);
+  void log();
 
   std::string log_filepath_;
 
@@ -52,28 +52,28 @@ class Config {
 
   ID_TYPE n_nearest_neighbor_;
 
-  bool is_ground_truth_;
+  bool examine_ground_truth_;
 
   bool require_neurofilter_;
-  ID_TYPE nf_dim_latent_;
-  VALUE_TYPE nf_leaky_relu_negative_slope_;
-  VALUE_TYPE nf_train_dropout_p_;
-  bool nf_train_is_gpu_;
-  bool nf_infer_is_gpu_;
-  ID_TYPE nf_device_id_;
-  ID_TYPE nf_train_nexample_;
-  ID_TYPE nf_train_batchsize_;
-  ID_TYPE nf_train_nepoch_;
-  VALUE_TYPE nf_train_learning_rate_;
-  VALUE_TYPE nf_train_min_lr_;
-  VALUE_TYPE nf_train_clip_grad_norm_type_;
-  VALUE_TYPE nf_train_clip_grad_max_norm_;
+  ID_TYPE filter_dim_latent_;
+  VALUE_TYPE filter_leaky_relu_negative_slope_;
+  VALUE_TYPE filter_train_dropout_p_;
+  bool filter_train_is_gpu_;
+  bool filter_infer_is_gpu_;
+  ID_TYPE filter_device_id_;
+  ID_TYPE filter_train_nexample_;
+  ID_TYPE filter_train_batchsize_;
+  ID_TYPE filter_train_nepoch_;
+  VALUE_TYPE filter_train_learning_rate_;
+  VALUE_TYPE filter_train_min_lr_;
+  VALUE_TYPE filter_train_clip_grad_norm_type_;
+  VALUE_TYPE filter_train_clip_grad_max_norm_;
 
-  std::string nf_query_filepath_;
+  std::string filter_query_filepath_;
 
-  bool nf_train_is_mthread_;
-  ID_TYPE nf_collect_nthread_;
-  ID_TYPE nf_train_nthread_;
+  bool filter_train_is_mthread_;
+  ID_TYPE filter_collect_nthread_;
+  ID_TYPE filter_train_nthread_;
 };
 
 }

@@ -6,6 +6,8 @@
 #ifndef DSTREE_GLOBAL_H
 #define DSTREE_GLOBAL_H
 
+#include <string>
+
 #include <torch/types.h>
 
 #define DEBUG
@@ -30,6 +32,8 @@ const VALUE_TYPE MIN_VALUE = -1e5;
 const VALUE_TYPE MAX_VALUE = 1e5;
 
 const ID_TYPE STR_DEFAULT_SIZE = 65536;
+
+const std::string LOGGER_NAME = "file_logger_mt";
 
 }
 }

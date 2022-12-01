@@ -9,7 +9,7 @@
 #include <cmath>
 #include <iostream>
 
-#include <boost/format.hpp>
+#include <spdlog/spdlog.h>
 
 #include "stat.h"
 
@@ -258,8 +258,7 @@ dstree::EAPCAEnvelope::EAPCAEnvelope(const Config &config,
 
 dstree::EAPCAEnvelope::EAPCAEnvelope(const Config &config,
                                      const dstree::EAPCAEnvelope &parent_eapca_envelope,
-                                     const dstree::Split &parent_split,
-                                     const upcite::Logger &logger) {
+                                     const dstree::Split &parent_split) {
   if (parent_split.is_vertical_split_) {
     nsegment_ = parent_eapca_envelope.nsegment_ + config.vertical_split_nsubsegment_ - 1;
     nsubsegment_ = parent_eapca_envelope.nsubsegment_ +
@@ -378,8 +377,7 @@ RESPONSE dstree::EAPCAEnvelope::update(const dstree::EAPCA &series_eapca) {
   return FAILURE;
 }
 
-VALUE_TYPE dstree::EAPCAEnvelope::cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr,
-                                                           const upcite::Logger &logger) const {
+VALUE_TYPE dstree::EAPCAEnvelope::cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr) const {
   VALUE_TYPE lowe_bound_distance = 0;
 
   VALUE_TYPE mean_diff, std_diff;

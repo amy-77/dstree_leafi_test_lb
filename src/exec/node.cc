@@ -6,9 +6,8 @@
 #include "node.h"
 
 #include <utility>
-#include <iostream>
 
-#include <boost/format.hpp>
+#include <spdlog/spdlog.h>
 
 #include "stat.h"
 #include "distance.h"
@@ -17,12 +16,10 @@ namespace dstree = upcite::dstree;
 namespace constant = upcite::constant;
 
 dstree::Node::Node(dstree::Config &config,
-                   upcite::Logger &logger,
                    dstree::BufferManager &buffer_manager,
                    ID_TYPE depth,
                    ID_TYPE id) :
     config_(config),
-    logger_(logger),
     depth_(depth),
     id_(id),
     buffer_(buffer_manager.create_node_buffer(id)),
@@ -36,13 +33,11 @@ dstree::Node::Node(dstree::Config &config,
 }
 
 dstree::Node::Node(dstree::Config &config,
-                   upcite::Logger &logger,
                    dstree::BufferManager &buffer_manager,
                    ID_TYPE depth,
                    ID_TYPE id,
                    EAPCAEnvelope &eapca_envelope) :
     config_(config),
-    logger_(logger),
     depth_(depth),
     id_(id),
     buffer_(buffer_manager.create_node_buffer(id)),
@@ -478,10 +473,10 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
   // TODO libc++abi: terminating with uncaught exception of type std::__1::bad_weak_ptr: bad_weak_ptr
 //  std::shared_ptr<dstree::Node> parent = shared_from_this();
 
-  dstree::EAPCAEnvelope child_eapca_envelope(config_, *eapca_envelope_, *split_, logger_);
+  dstree::EAPCAEnvelope child_eapca_envelope(config_, *eapca_envelope_, *split_);
 
   for (child_id = 0; child_id < config_.get().node_nchild_; ++child_id) {
-    children_.emplace_back(std::make_unique<dstree::Node>(config_, logger_, buffer_manager,
+    children_.emplace_back(std::make_unique<dstree::Node>(config_, buffer_manager,
                                                           depth_ + 1, first_child_id + child_id,
                                                           child_eapca_envelope));
 
@@ -571,23 +566,23 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
-  MALAT_LOG(logger_.get().logger, trivial::debug) << boost::format(
-        "parent %d, split %d-%d @ %.3f = %.3f: (%d in) %d @ %d + %d, child %d (%d == %d) + %d (%d == %d)")
-        % id_
-        % split_->is_vertical_split_
-        % split_->horizontal_split_mode_
-        % split_->horizontal_breakpoints_[0]
-        % best_so_far_quality_gain
-        % split_->split_subsegment_id_
-        % split_->split_segment_id_
-        % split_->split_segment_offset_
-        % split_->split_segment_length_
-        % children_[0]->id_
-        % children_[0]->nseries_
-        % children_[0]->buffer_.get().size()
-        % children_[1]->id_
-        % children_[1]->nseries_
-        % children_[1]->buffer_.get().size();
+  spdlog::debug(
+      "parent {:d}, split {:d}-{:d} @ {:.3f} = {:.3f}: ({:d} in) {:d} @ {:d} + {:d}, child {:d} ({:d} == {:d}) + {:d} ({:d} == {:d})",
+      id_,
+      split_->is_vertical_split_,
+      static_cast<ID_TYPE>(split_->horizontal_split_mode_),
+      split_->horizontal_breakpoints_[0],
+      best_so_far_quality_gain,
+      split_->split_subsegment_id_,
+      split_->split_segment_id_,
+      split_->split_segment_offset_,
+      split_->split_segment_length_,
+      children_[0]->id_,
+      children_[0]->nseries_,
+      children_[0]->buffer_.get().size(),
+      children_[1]->id_,
+      children_[1]->nseries_,
+      children_[1]->buffer_.get().size());
 //#endif
 #endif
 
@@ -623,12 +618,8 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
     if (answer.is_bsf(distance)) {
       answer.push_bsf(distance);
 
-      MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-            "query %d update bsf %f at node %d series %s")
-            % answer.query_id_
-            % distance
-            % visited_node_counter
-            % visited_series_counter;
+      spdlog::info("query {:d} update bsf {:.3f} at node {:d} series {:d}",
+                   answer.query_id_, distance, visited_node_counter, visited_series_counter);
     }
 
     visited_series_counter += 1;
@@ -672,8 +663,7 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 }
 
 RESPONSE dstree::Node::log() {
-  MALAT_LOG(logger_.get().logger, trivial::info)
-    << boost::format("node_id = %d, node_depth = %d, node_size = %d") % id_ % depth_ % nseries_;
+  spdlog::info("node {:d}: depth = {:d}, size = {:d}", id_, depth_, nseries_);
 
   return SUCCESS;
 }

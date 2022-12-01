@@ -8,7 +8,7 @@
 #include <memory>
 #include <immintrin.h>
 
-#include <boost/format.hpp>
+#include <spdlog/spdlog.h>
 #include <boost/filesystem.hpp>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -21,22 +21,21 @@ namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
 
-dstree::Index::Index(Config &config, upcite::Logger &logger) :
+dstree::Index::Index(Config &config) :
     config_(config),
-    logger_(logger),
     nnode_(0),
     nleaf_(0),
-    nf_train_query_ptr_(nullptr) {
-  buffer_manager_ = std::make_unique<dstree::BufferManager>(config_, logger_);
+    filter_train_query_ptr_(nullptr) {
+  buffer_manager_ = std::make_unique<dstree::BufferManager>(config_);
 
-  root_ = std::make_unique<dstree::Node>(config_, logger_, *buffer_manager_, 0, nnode_);
+  root_ = std::make_unique<dstree::Node>(config_, *buffer_manager_, 0, nnode_);
   nnode_ += 1, nleaf_ += 1;
 }
 
 dstree::Index::~Index() {
-  if (nf_train_query_ptr_ != nullptr) {
-    std::free(nf_train_query_ptr_);
-    nf_train_query_ptr_ = nullptr;
+  if (filter_train_query_ptr_ != nullptr) {
+    std::free(filter_train_query_ptr_);
+    filter_train_query_ptr_ = nullptr;
   }
 }
 
@@ -88,28 +87,28 @@ RESPONSE dstree::Index::insert(ID_TYPE batch_series_id) {
   return target_node.get().insert(batch_series_id, series_eapca);
 }
 
-RESPONSE dstree::Index::nf_initialize(dstree::Node &node,
+RESPONSE dstree::Index::filter_initialize(dstree::Node &node,
                                       ID_TYPE *filter_id) {
   if (node.is_leaf()) {
-    node.neurofilter_ = std::make_unique<dstree::Filter>(logger_, config_, *filter_id, nf_train_query_tsr_);
+    node.implant_filter(*filter_id, filter_train_query_tsr_);
 
-    filter_cache_.push(std::ref(*node.neurofilter_));
+    filter_cache_.push(node.get_filter());
     *filter_id += 1;
   } else {
-    for (ID_TYPE child_id = 0; child_id < config_.get().node_nchild_; ++child_id) {
-      nf_initialize(*node.children_[child_id], filter_id);
+    for (auto child_node : node) {
+      filter_initialize(child_node, filter_id);
     }
   }
 
   return SUCCESS;
 }
 
-RESPONSE dstree::Index::nf_collect() {
+RESPONSE dstree::Index::filter_collect() {
   auto *m256_fetch_cache = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256),
                                                                    sizeof(VALUE_TYPE) * 8));
 
-  for (ID_TYPE query_id = 0; query_id < config_.get().nf_train_nexample_; ++query_id) {
-    const VALUE_TYPE *series_ptr = nf_train_query_ptr_ + config_.get().series_length_ * query_id;
+  for (ID_TYPE query_id = 0; query_id < config_.get().filter_train_nexample_; ++query_id) {
+    const VALUE_TYPE *series_ptr = filter_train_query_ptr_ + config_.get().series_length_ * query_id;
 
     ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
     auto answer = std::make_shared<dstree::Answer>(config_.get().n_nearest_neighbor_, query_id);
@@ -122,18 +121,14 @@ RESPONSE dstree::Index::nf_collect() {
     ID_TYPE resident_node_id = resident_node.get().get_id();
 
     VALUE_TYPE local_nn_distance = resident_node.get().search(series_ptr, m256_fetch_cache);
-    resident_node.get().neurofilter_->push_example(answer->get_bsf(), local_nn_distance);
+    resident_node.get().push_filter_example(answer->get_bsf(), local_nn_distance);
 
     visited_node_counter += 1;
     visited_series_counter += resident_node.get().get_size();
 
     if (answer->is_bsf(local_nn_distance)) {
-      MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-          "nf query %d update bsf %f after node %d series %s")
-          % query_id
-          % local_nn_distance
-          % visited_node_counter
-          % visited_series_counter;
+      spdlog::info("filter query {:d} update bsf {:.3f} after node {:d} series {:d}",
+                   query_id, local_nn_distance, visited_node_counter, visited_series_counter);
 
       answer->push_bsf(local_nn_distance);
     }
@@ -142,7 +137,8 @@ RESPONSE dstree::Index::nf_collect() {
 
     // ref: https://stackoverflow.com/questions/9055778/initializing-a-reference-to-member-to-null-in-c
     // TODO better workarounds?
-    std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr); // WARN undefined behaviour
+    // WARN undefined behaviour
+    std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
     VALUE_TYPE node2visit_lbdistance;
 
     while (!leaf_min_heap_.empty()) {
@@ -153,27 +149,23 @@ RESPONSE dstree::Index::nf_collect() {
       if (node_to_visit.get().is_leaf()) {
         if (node_to_visit.get().get_id() != resident_node_id) {
           local_nn_distance = node_to_visit.get().search(series_ptr, m256_fetch_cache);
-          node_to_visit.get().neurofilter_->push_example(answer->get_bsf(), local_nn_distance);
+          node_to_visit.get().push_filter_example(answer->get_bsf(), local_nn_distance);
 
           visited_node_counter += 1;
           visited_series_counter += node_to_visit.get().get_size();
 
           if (answer->is_bsf(local_nn_distance)) {
-            MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-                "nf query %d update bsf %f after node %d series %s")
-                % query_id
-                % local_nn_distance
-                % visited_node_counter
-                % visited_series_counter;
+            spdlog::info("filter query {:d} update bsf {:.3f} after node {:d} series {:d}",
+                         query_id, local_nn_distance, visited_node_counter, visited_series_counter);
 
             answer->push_bsf(local_nn_distance);
           }
         }
       } else {
-        for (const auto &child_node : node_to_visit.get().children_) {
-          VALUE_TYPE child_lower_bound_EDsquare = child_node->cal_lower_bound_EDsquare(series_ptr);
+        for (auto child_node : node_to_visit.get()) {
+          VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(series_ptr);
 
-          leaf_min_heap_.push(std::make_tuple(std::ref(*child_node), child_lower_bound_EDsquare));
+          leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
         }
       }
     }
@@ -181,7 +173,7 @@ RESPONSE dstree::Index::nf_collect() {
 #ifdef DEBUG
 #ifndef DEBUGGED
     MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-          "nf query %d visited %d nodes %d series")
+          "filter query %d visited %d nodes %d series")
           % query_id
           % visited_node_counter
           % visited_series_counter;
@@ -195,8 +187,6 @@ RESPONSE dstree::Index::nf_collect() {
 
 struct SearchCache {
   SearchCache(ID_TYPE thread_id,
-//              upcite::Logger &logger,
-//              dstree::Config &config,
               VALUE_TYPE *m256_fetch_cache,
               dstree::Answer *answer,
               pthread_rwlock_t *answer_lock,
@@ -208,8 +198,6 @@ struct SearchCache {
               ID_TYPE *visited_series_counter,
               pthread_mutex_t *log_mutex) :
       thread_id_(thread_id),
-//      logger_(logger),
-//      config_(config),
       query_id_(-1),
       query_series_ptr_(nullptr),
       m256_fetch_cache_(m256_fetch_cache),
@@ -222,9 +210,6 @@ struct SearchCache {
       log_mutex_(log_mutex) {}
 
   ID_TYPE thread_id_;
-
-//  upcite::Logger &logger_;
-//  dstree::Config &config_;
 
   ID_TYPE query_id_;
   VALUE_TYPE *query_series_ptr_;
@@ -249,13 +234,31 @@ void search_thread_F(const SearchCache &search_cache) {
   // https://stackoverflow.com/questions/49628615/understanding-corrupted-size-vs-prev-size-glibc-error
 //  auto m256_fetch_cache = std::unique_ptr<VALUE_TYPE>(static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), 8)));
 
-  std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr); // WARN undefined behaviour
+  // WARN undefined behaviour
+  std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
   VALUE_TYPE node2visit_lbdistance;
   VALUE_TYPE local_nn_distance;
 
   pthread_rwlock_wrlock(search_cache.answer_lock_);
   VALUE_TYPE local_bsf = search_cache.answer_->get_bsf();
   pthread_rwlock_unlock(search_cache.answer_lock_);
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+  pthread_mutex_lock(search_cache.log_mutex_);
+
+  // boost::format is not thread safe
+  // https://stackoverflow.com/questions/51566505/boostformat-appears-to-not-be-thread-safe-because-stdctypecharnarrow
+  MALAT_LOG(search_cache.logger_.get().logger, trivial::info) << boost::format(
+        "filter query %d thread %d initial bsf %f before %d node")
+        % search_cache.query_id_
+        % search_cache.thread_id_
+        % local_bsf
+        % search_cache.leaf_min_heap_.get().size();
+
+  pthread_mutex_unlock(search_cache.log_mutex_);
+#endif
+#endif
 
   while (true) {
     pthread_rwlock_wrlock(search_cache.leaf_pq_lock_);
@@ -270,14 +273,14 @@ void search_thread_F(const SearchCache &search_cache) {
       pthread_rwlock_unlock(search_cache.leaf_pq_lock_);
     }
 
-    if (node_to_visit.get().neurofilter_ == nullptr) {
-      local_nn_distance = node_to_visit.get().search(
-          search_cache.query_series_ptr_, search_cache.m256_fetch_cache_, local_bsf);
-    } else {
+    if (node_to_visit.get().has_filter()) {
       local_nn_distance = node_to_visit.get().search(
           search_cache.query_series_ptr_, search_cache.m256_fetch_cache_);
 
-      node_to_visit.get().neurofilter_->push_example(local_bsf, local_nn_distance);
+      node_to_visit.get().push_filter_example(local_bsf, local_nn_distance);
+    } else {
+      local_nn_distance = node_to_visit.get().search(
+          search_cache.query_series_ptr_, search_cache.m256_fetch_cache_, local_bsf);
     }
 
     pthread_mutex_lock(search_cache.log_mutex_);
@@ -293,29 +296,22 @@ void search_thread_F(const SearchCache &search_cache) {
       pthread_rwlock_unlock(search_cache.answer_lock_);
 
 #ifdef DEBUG
-#ifndef DEBUGGED
-      pthread_mutex_lock(search_cache.log_mutex_);
-
-      // boost::format is not thread safe
-      // https://stackoverflow.com/questions/51566505/boostformat-appears-to-not-be-thread-safe-because-stdctypecharnarrow
-      MALAT_LOG(search_cache.logger_.logger, trivial::info) << boost::format(
-            "nf query %d thread %d update bsf %f after node %d series %d")
-            % search_cache.query_id_
-            % search_cache.thread_id_
-            % local_nn_distance
-            % *search_cache.visited_node_counter_
-            % *search_cache.visited_series_counter_;
-
-      pthread_mutex_unlock(search_cache.log_mutex_);
-#endif
+//#ifndef DEBUGGED
+      spdlog::info("filter query {:d} thread {:d} update bsf {:.3f} after node {:d} series {:d}",
+                   search_cache.query_id_,
+                   search_cache.thread_id_,
+                   local_nn_distance,
+                   *search_cache.visited_node_counter_,
+                   *search_cache.visited_series_counter_);
+//#endif
 #endif
     }
   }
 }
 
-RESPONSE dstree::Index::nf_collect_mthread() {
-  auto *m256_fetch_cache =
-      static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), 8 * config_.get().nf_collect_nthread_));
+RESPONSE dstree::Index::filter_collect_mthread() {
+  auto *m256_fetch_cache = static_cast<VALUE_TYPE *>(aligned_alloc(
+      sizeof(__m256), 8 * config_.get().filter_collect_nthread_));
 
   ID_TYPE visited_node_counter = 0;
   ID_TYPE visited_series_counter = 0;
@@ -329,10 +325,8 @@ RESPONSE dstree::Index::nf_collect_mthread() {
   std::vector<SearchCache> search_caches;
   std::stack<std::reference_wrapper<dstree::Node>> node_stack;
 
-  for (ID_TYPE thread_id = 0; thread_id < config_.get().nf_collect_nthread_; ++thread_id) {
+  for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_collect_nthread_; ++thread_id) {
     search_caches.emplace_back(thread_id,
-//                               std::ref(*logger_),
-//                               std::ref(*config_),
                                m256_fetch_cache + 8 * thread_id,
                                answer.get(),
                                answer_lock.get(),
@@ -343,8 +337,8 @@ RESPONSE dstree::Index::nf_collect_mthread() {
                                log_mutex.get());
   }
 
-  for (ID_TYPE query_id = 0; query_id < config_.get().nf_train_nexample_; ++query_id) {
-    VALUE_TYPE *series_ptr = nf_train_query_ptr_ + config_.get().series_length_ * query_id;
+  for (ID_TYPE query_id = 0; query_id < config_.get().filter_train_nexample_; ++query_id) {
+    VALUE_TYPE *series_ptr = filter_train_query_ptr_ + config_.get().series_length_ * query_id;
 
     visited_node_counter = 0;
     visited_series_counter = 0;
@@ -356,30 +350,26 @@ RESPONSE dstree::Index::nf_collect_mthread() {
       resident_node = resident_node.get().route(series_ptr);
     }
 
-    for (ID_TYPE thread_id = 0; thread_id < config_.get().nf_collect_nthread_; ++thread_id) {
+    for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_collect_nthread_; ++thread_id) {
       search_caches[thread_id].query_id_ = query_id;
       search_caches[thread_id].query_series_ptr_ = series_ptr;
     }
 
     VALUE_TYPE local_nn_distance = resident_node.get().search(series_ptr, m256_fetch_cache);
-    resident_node.get().neurofilter_->push_example(answer->get_bsf(), local_nn_distance);
+    resident_node.get().push_filter_example(answer->get_bsf(), local_nn_distance);
 
     visited_node_counter += 1;
     visited_series_counter += resident_node.get().get_size();
 
     if (answer->is_bsf(local_nn_distance)) {
-      MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-          "nf query %d update bsf %f after node %d series %s")
-          % query_id
-          % local_nn_distance
-          % visited_node_counter
-          % visited_series_counter;
+      spdlog::info("filter query {:d} update bsf {:.3f} after node {:d} series {:d}",
+                   query_id, local_nn_distance, visited_node_counter, visited_series_counter);
 
       answer->push_bsf(local_nn_distance);
     }
 
     assert(node_stack.empty() && leaf_min_heap_.empty());
-    node_stack.push(resident_node);
+    node_stack.push(std::ref(*root_));
 
     while (!node_stack.empty()) {
       std::reference_wrapper<dstree::Node> node_to_visit = node_stack.top();
@@ -391,33 +381,33 @@ RESPONSE dstree::Index::nf_collect_mthread() {
                                               node_to_visit.get().cal_lower_bound_EDsquare(series_ptr)));
         }
       } else {
-        for (const auto &child_node : node_to_visit.get().children_) {
-          node_stack.push(std::ref(*child_node));
+        for (auto child_node : node_to_visit.get()) {
+          node_stack.push(child_node);
         }
       }
     }
 
+#ifdef DEBUG
+//#ifndef DEBUGGED
+    spdlog::info("filter query {:d} enqueued {:d} nodes",
+                 query_id, leaf_min_heap_.size());
+//#endif
+#endif
+
     std::vector<std::thread> threads;
 
-    for (ID_TYPE thread_id = 0; thread_id < config_.get().nf_collect_nthread_; ++thread_id) {
+    for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_collect_nthread_; ++thread_id) {
       threads.emplace_back(search_thread_F, search_caches[thread_id]);
     }
 
-    for (ID_TYPE thread_id = 0; thread_id < config_.get().nf_collect_nthread_; ++thread_id) {
+    for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_collect_nthread_; ++thread_id) {
       threads[thread_id].join();
     }
 
 #ifdef DEBUG
     //#ifndef DEBUGGED
-    MALAT_LOG(logger_.get().logger, trivial::info) << "test";
-//    boost::format(
-//          "nf query %d visited %d nodes %d series")
-//          % query_id
-//          % visited_node_counter
-//          % visited_series_counter;
-//    ("nf query " + std::to_string(query_id) + " visited " +
-//        std::to_string(visited_node_counter) + " nodes " +
-//        std::to_string(visited_series_counter) + " series");
+    spdlog::info("filter query {:d} visited {:d} nodes {:d} series",
+                 query_id, visited_node_counter, visited_series_counter);
     //#endif
 #endif
   }
@@ -426,7 +416,7 @@ RESPONSE dstree::Index::nf_collect_mthread() {
   return SUCCESS;
 }
 
-RESPONSE dstree::Index::nf_train() {
+RESPONSE dstree::Index::filter_train() {
   while (!filter_cache_.empty()) {
     std::reference_wrapper<Filter> filter = filter_cache_.top();
     filter_cache_.pop();
@@ -439,23 +429,16 @@ RESPONSE dstree::Index::nf_train() {
 
 struct TrainCache {
   TrainCache(ID_TYPE thread_id,
-             upcite::Logger &logger,
-             dstree::Config &config,
              at::cuda::CUDAStream stream,
              std::stack<std::reference_wrapper<dstree::Filter>> &filter_cache,
              pthread_rwlock_t *filter_cache_lock) :
       thread_id_(thread_id),
-      logger_(logger),
-      config_(config),
       stream_(stream),
       filter_cache_(filter_cache),
       filter_cache_lock_(filter_cache_lock) {}
   ~TrainCache() = default;
 
   ID_TYPE thread_id_;
-
-  upcite::Logger &logger_;
-  dstree::Config &config_;
 
   at::cuda::CUDAStream stream_;
 
@@ -484,9 +467,9 @@ void train_thread_F(TrainCache &train_cache) {
   }
 }
 
-RESPONSE dstree::Index::nf_train_mthread() {
+RESPONSE dstree::Index::filter_train_mthread() {
   // TODO enable multithread train on CPU
-  assert(config_.get().nf_train_is_gpu_);
+  assert(config_.get().filter_train_is_gpu_);
   assert(torch::cuda::is_available());
 
   std::stack<std::reference_wrapper<dstree::Filter>> filters;
@@ -500,44 +483,46 @@ RESPONSE dstree::Index::nf_train_mthread() {
     node_stack.pop();
 
     if (node_to_visit.get().is_leaf()) {
-      if (node_to_visit.get().neurofilter_ != nullptr) {
-        filters.push(std::ref(*node_to_visit.get().neurofilter_));
+      if (node_to_visit.get().has_filter()) {
+        filters.push(node_to_visit.get().get_filter());
       }
     } else {
-      for (const auto &child_node : node_to_visit.get().children_) {
-        node_stack.push(std::ref(*child_node));
+      for (auto child_node : node_to_visit.get()) {
+        node_stack.push(child_node);
       }
     }
   }
 
+#ifdef DEBUG
+  //#ifndef DEBUGGED
+  spdlog::debug("filter en-stack {:d} filters", filters.size());
+  //#endif
+#endif
+
   std::vector<std::unique_ptr<TrainCache>> train_caches;
 
-  for (ID_TYPE thread_id = 0; thread_id < config_.get().nf_train_nthread_; ++thread_id) {
-    at::cuda::CUDAStream new_stream = at::cuda::getStreamFromPool(false, config_.get().nf_device_id_);
+  for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {
+    at::cuda::CUDAStream new_stream = at::cuda::getStreamFromPool(false, config_.get().filter_device_id_);
 
-    MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-          "thread %d stream id = %d, query = %d, priority = %d")
-          % thread_id
-          % new_stream.id()
-          % new_stream.query()
-          % new_stream.priority(); // compiles with libtorch-gpu
+    spdlog::info("thread {:d} stream id = {:d}, query = {:d}, priority = {:d}",
+                 thread_id,
+                 static_cast<ID_TYPE>(new_stream.id()),
+                 static_cast<ID_TYPE>(new_stream.query()),
+                 static_cast<ID_TYPE>(new_stream.priority())); // compiles with libtorch-gpu
 
-    train_caches.push_back(std::make_unique<TrainCache>(thread_id,
-                                                        logger_,
-                                                        config_,
-                                                        std::move(new_stream),
-                                                        std::ref(filters),
-                                                        filter_stack_lock.get()));
+    train_caches.emplace_back(std::make_unique<TrainCache>(thread_id,
+                                                           std::move(new_stream),
+                                                           std::ref(filters),
+                                                           filter_stack_lock.get()));
   }
 
   std::vector<std::thread> threads;
 
-  for (ID_TYPE thread_id = 0; thread_id < config_.get().nf_train_nthread_; ++thread_id) {
-    std::thread current_thread(train_thread_F, std::ref(*train_caches[thread_id]));
-    threads.push_back(std::move(current_thread));
+  for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {
+    threads.emplace_back(train_thread_F, std::ref(*train_caches[thread_id]));
   }
 
-  for (ID_TYPE thread_id = 0; thread_id < config_.get().nf_train_nthread_; ++thread_id) {
+  for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {
     threads[thread_id].join();
   }
 
@@ -545,71 +530,61 @@ RESPONSE dstree::Index::nf_train_mthread() {
 }
 
 RESPONSE dstree::Index::train() {
-  if (!fs::exists(config_.get().nf_query_filepath_)) {
-    MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-          "neurofilter train query filepath %s does not exist")
-          % config_.get().nf_query_filepath_;
+  if (!fs::exists(config_.get().filter_query_filepath_)) {
+    spdlog::error("filter train query filepath {:s} does not exist", config_.get().filter_query_filepath_);
   } else {
-    std::ifstream query_fin(config_.get().nf_query_filepath_, std::ios::in | std::ios::binary);
+    std::ifstream query_fin(config_.get().filter_query_filepath_, std::ios::in | std::ios::binary);
     if (!query_fin.good()) {
-      MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-            "neurofilter train query filepath %s cannot open")
-            % config_.get().nf_query_filepath_;
+      spdlog::error("filter train query filepath {:s} cannot open", config_.get().filter_query_filepath_);
     }
 
     auto query_nbytes = static_cast<ID_TYPE>(
-        sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().nf_train_nexample_;
-    nf_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_nbytes));
+        sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().filter_train_nexample_;
+    filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_nbytes));
 
-    query_fin.read(reinterpret_cast<char *>(nf_train_query_ptr_), query_nbytes);
+    query_fin.read(reinterpret_cast<char *>(filter_train_query_ptr_), query_nbytes);
 
     if (query_fin.fail()) {
-      MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-            "cannot read %d bytes from %s")
-            % config_.get().nf_query_filepath_
-            % query_nbytes;
+      spdlog::error("cannot read {:d} bytes from {:s}", query_nbytes, config_.get().filter_query_filepath_);
 
-      std::free(nf_train_query_ptr_);
-      nf_train_query_ptr_ = nullptr;
+      std::free(filter_train_query_ptr_);
+      filter_train_query_ptr_ = nullptr;
     }
   }
 
-  if (nf_train_query_ptr_ == nullptr) {
-    MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-          "generate synthetic neurofilter train queries");
+  if (filter_train_query_ptr_ == nullptr) {
+    spdlog::info("generate synthetic filter train queries");
 
     // TODO
   }
 
-  if (config_.get().nf_train_is_gpu_) {
+  if (config_.get().filter_train_is_gpu_) {
     // TODO support multiple devices
-    device_ = std::make_unique<torch::Device>(torch::kCUDA, static_cast<c10::DeviceIndex>(config_.get().nf_device_id_));
+    device_ = std::make_unique<torch::Device>(torch::kCUDA, static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
   } else {
     device_ = std::make_unique<torch::Device>(torch::kCPU);
   }
 
-  nf_train_query_tsr_ = torch::from_blob(nf_train_query_ptr_,
-                                         {config_.get().nf_train_nexample_, config_.get().series_length_},
+  filter_train_query_tsr_ = torch::from_blob(filter_train_query_ptr_,
+                                         {config_.get().filter_train_nexample_, config_.get().series_length_},
                                          torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
-  nf_train_query_tsr_ = nf_train_query_tsr_.to(*device_);
+  filter_train_query_tsr_ = filter_train_query_tsr_.to(*device_);
 
   ID_TYPE filter_id = 0;
-  nf_initialize(*root_, &filter_id);
+  filter_initialize(*root_, &filter_id);
 
-  MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-        "initialized %d neurofilters")
-        % filter_id;
+  spdlog::info("initialized {:d} filters", filter_id);
 
-  if (config_.get().nf_train_is_mthread_) {
-    nf_collect_mthread();
+  if (config_.get().filter_train_is_mthread_) {
+    filter_collect_mthread();
   } else {
-    nf_collect();
+    filter_collect();
   }
 
-  if (config_.get().nf_train_is_mthread_) {
-    nf_train_mthread();
+  if (config_.get().filter_train_is_mthread_) {
+    filter_train_mthread();
   } else {
-    nf_train();
+    filter_train();
   }
 
   return SUCCESS;
@@ -631,18 +606,14 @@ RESPONSE dstree::Index::dump() {
 
 RESPONSE dstree::Index::search() {
   if (!fs::exists(config_.get().query_filepath_)) {
-    MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-          "query filepath does not exist = %s")
-          % config_.get().query_filepath_;
+    spdlog::error("query filepath {:s} does not exist", config_.get().query_filepath_);
 
     return FAILURE;
   }
 
   std::ifstream query_fin(config_.get().query_filepath_, std::ios::in | std::ios::binary);
   if (!query_fin.good()) {
-    MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-          "query filepath cannot open = %s")
-          % config_.get().db_filepath_;
+    spdlog::error("query filepath {:s} cannot open", config_.get().query_filepath_);
 
     return FAILURE;
   }
@@ -654,10 +625,7 @@ RESPONSE dstree::Index::search() {
   query_fin.read(reinterpret_cast<char *>(query_buffer), query_nbytes);
 
   if (query_fin.fail()) {
-    MALAT_LOG(logger_.get().logger, trivial::error) << boost::format(
-          "cannot read %d bytes from %s")
-          % config_.get().db_filepath_
-          % query_nbytes;
+    spdlog::error("cannot read {:d} bytes from {:s}", query_nbytes, config_.get().query_filepath_);
 
     return FAILURE;
   }
@@ -674,10 +642,10 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
   auto answer = std::make_shared<dstree::Answer>(config_.get().n_nearest_neighbor_, query_id);
 
   if (config_.get().require_neurofilter_) {
-    nf_query_tsr_ = torch::from_blob(series_ptr,
+    filter_query_tsr_ = torch::from_blob(series_ptr,
                                      {1, config_.get().series_length_},
                                      torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
-    nf_query_tsr_ = nf_query_tsr_.to(*device_);
+    filter_query_tsr_ = filter_query_tsr_.to(*device_);
   }
 
   std::reference_wrapper<dstree::Node> resident_node = std::ref(*root_);
@@ -696,7 +664,8 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
   if (config_.get().is_exact_search_) {
     leaf_min_heap_.push(std::make_tuple(resident_node, 0));
 
-    std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr); // WARN undefined behaviour
+    // WARN undefined behaviour
+    std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
     VALUE_TYPE node2visit_lbdistance;
 
     while (!leaf_min_heap_.empty()) {
@@ -720,25 +689,24 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
         if (visited_node_counter < config_.get().search_max_nnode_
             && visited_series_counter < config_.get().search_max_nseries_) {
           if (node_to_visit.get().get_id() != resident_node_id) {
-            if (config_.get().is_ground_truth_ || answer->is_bsf(node2visit_lbdistance)) {
+            if (config_.get().examine_ground_truth_ || answer->is_bsf(node2visit_lbdistance)) {
 //              if (node_to_visit->neurofilter_ != nullptr
-//                  && node_to_visit->neurofilter_->infer(nf_query_tsr_) < answer->get_bsf()) {
+//                  && node_to_visit->neurofilter_->infer(filter_query_tsr_) < answer->get_bsf()) {
 //                node_to_visit->search(series_ptr, answer, visited_node_counter, visited_series_counter);
 //              } else {
 //                nfpruned_node_counter += 1;
 //                nfpruned_series_counter += node_to_visit->get_size();
 //              }
-              if (node_to_visit.get().neurofilter_ != nullptr) {
-                VALUE_TYPE predicted_nn_distance = node_to_visit.get().neurofilter_->infer(nf_query_tsr_);
+              if (node_to_visit.get().has_filter()) {
+                VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
 
 #ifdef DEBUG
                 //#ifndef DEBUGGED
-                MALAT_LOG(logger_.get().logger, trivial::debug) << boost::format(
-                      "query %d node_id %d predicted_nn_distance %.3f bsf %.3f")
-                      % answer->query_id_
-                      % node_to_visit.get().get_id()
-                      % predicted_nn_distance
-                      % answer->get_bsf();
+                spdlog::debug("query {:d} node_id {:d} predicted_nn_distance {:.3f} bsf {:.3f}",
+                              answer->query_id_,
+                              node_to_visit.get().get_id(),
+                              predicted_nn_distance,
+                              answer->get_bsf());
                 //#endif
 #endif
 
@@ -755,38 +723,29 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
           }
         }
       } else {
-        for (const auto &child_node : node_to_visit.get().children_) {
-          VALUE_TYPE child_lower_bound_EDsquare = child_node->cal_lower_bound_EDsquare(series_ptr);
+        for (auto child_node : node_to_visit.get()) {
+          VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(series_ptr);
 
-          if (config_.get().is_ground_truth_ || answer->is_bsf(child_lower_bound_EDsquare)) {
-            leaf_min_heap_.push(std::make_tuple(std::ref(*child_node), child_lower_bound_EDsquare));
+          if (config_.get().examine_ground_truth_ || answer->is_bsf(child_lower_bound_EDsquare)) {
+            leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
           }
         }
       }
     }
   }
 
-  MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-        "query %d visited %d nodes %d series")
-        % query_id
-        % visited_node_counter
-        % visited_series_counter;
+  spdlog::info("query {:d} visited {:d} nodes {:d} series",
+               query_id, visited_node_counter, visited_series_counter);
 
   if (config_.get().require_neurofilter_) {
-    MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-          "query %d neurofilters pruned %d nodes %d series")
-          % query_id
-          % nfpruned_node_counter
-          % nfpruned_series_counter;
+    spdlog::info("query {:d} neurofilters pruned {:d} nodes {:d} series",
+                 query_id, nfpruned_node_counter, nfpruned_series_counter);
   }
 
   ID_TYPE nnn_to_return = config_.get().n_nearest_neighbor_;
   while (!answer->empty()) {
-    MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-          "query %d nn %d = %f")
-          % query_id
-          % nnn_to_return
-          % answer->pop_bsf();
+    spdlog::info("query {:d} nn {:d} = {:.3f}",
+                 query_id, nnn_to_return, answer->pop_bsf());
 
     nnn_to_return -= 1;
   }

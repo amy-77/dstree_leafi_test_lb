@@ -5,6 +5,8 @@
 
 #include "filter.h"
 
+#include <cmath>
+
 #include <spdlog/spdlog.h>
 #include <torch/data/example.h>
 #include <torch/data/datasets/base.h>
@@ -15,22 +17,27 @@
 
 namespace dstree = upcite::dstree;
 
-class TORCH_API SeriesDataset : public torch::data::datasets::Dataset<SeriesDataset> {
+class TORCH_API SeriesDataset
+    : public torch::data::datasets::Dataset<SeriesDataset> {
  public:
-  explicit SeriesDataset(torch::Tensor &series,
+  explicit SeriesDataset(torch::Tensor
+                         &series,
                          std::vector<VALUE_TYPE> &targets,
                          int num_instances,
-                         torch::Device device) :
+                         torch::Device
+                         device) :
       series_(series),
       targets_(torch::from_blob(targets.data(),
                                 num_instances,
                                 torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(device)) {}
 
-  torch::data::Example<> get(size_t index) override {
+  torch::data::Example<> get(size_t index)
+  override {
     return {series_[index], targets_[index]};
   }
 
-  torch::optional<size_t> size() const override {
+  torch::optional<size_t> size() const
+  override {
     return targets_.size(0);
   }
 
@@ -119,7 +126,20 @@ RESPONSE dstree::Filter::train() {
                 stream_id, id_, upcite::get_str(nn_distances_.data(), train_size_));
 #endif
 
-  ID_TYPE num_train_examples = train_size_ / 6 * 5;
+  if (config_.get().filter_remove_square_) {
+    for (ID_TYPE i = 0; i < train_size_; ++i) {
+      nn_distances_[i] = sqrt(nn_distances_[i]);
+    }
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+    spdlog::debug("stream {:d} filter {:d} nn sqrt = {:s}",
+                  stream_id, id_, upcite::get_str(nn_distances_.data(), train_size_));
+#endif
+#endif
+  }
+
+  ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
 //    int num_valid_examples = train_size_ - num_train_examples;
 
   auto dataset = SeriesDataset(shared_train_queries_, nn_distances_, num_train_examples, *device_);
@@ -162,7 +182,7 @@ RESPONSE dstree::Filter::train() {
 
 #ifdef DEBUG
     global_losses.emplace_back(std::accumulate(local_losses.begin(), local_losses.end(), 0.0)
-                                   / (float) local_losses.size());
+                                   / static_cast<VALUE_TYPE>(local_losses.size()));
     local_losses.clear();
 #endif
   }
@@ -187,6 +207,21 @@ RESPONSE dstree::Filter::train() {
 
     spdlog::info("stream {:d} filter {:d} predictions = {:s}",
                  stream_id, id_, upcite::get_str(predictions.accessor<VALUE_TYPE, 1>().data(), train_size_));
+
+    if (config_.get().filter_remove_square_) {
+      VALUE_TYPE *predictions_ptr = predictions.accessor<VALUE_TYPE, 1>().data();
+      VALUE_TYPE pred_square[train_size_];
+
+      for (ID_TYPE i = 0; i < train_size_; ++i) {
+        pred_square[i] = predictions_ptr[i] * predictions_ptr[i];
+      }
+
+      spdlog::debug("stream {:d} filter {:d} predictions = {:s}",
+                    stream_id, id_, upcite::get_str(pred_square, train_size_));
+    } else {
+      spdlog::info("stream {:d} filter {:d} predictions = {:s}",
+                   stream_id, id_, upcite::get_str(predictions.accessor<VALUE_TYPE, 1>().data(), train_size_));
+    }
   };
 #endif
 
@@ -218,7 +253,13 @@ VALUE_TYPE dstree::Filter::infer(torch::Tensor &query_series) const {
   if (is_trained_) {
     torch::NoGradGuard no_grad;
 
-    return model_->infer(query_series).item<VALUE_TYPE>();
+    VALUE_TYPE pred = model_->infer(query_series).item<VALUE_TYPE>();
+
+    if (config_.get().filter_remove_square_) {
+      return pred * pred;
+    } else {
+      return pred;
+    }
   } else {
     return constant::MAX_VALUE;
   }

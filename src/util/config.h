@@ -74,6 +74,9 @@ class Config {
   bool filter_train_is_mthread_;
   ID_TYPE filter_collect_nthread_;
   ID_TYPE filter_train_nthread_;
+
+  bool filter_remove_square_;
+  VALUE_TYPE filter_train_val_split_;
 };
 
 }

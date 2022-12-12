@@ -20,10 +20,12 @@ int main(int argc, char *argv[]) {
   std::shared_ptr<spdlog::logger> logger = spdlog::basic_logger_mt(constant::LOGGER_NAME, config->log_filepath_);
 
 #ifdef DEBUG
-  logger->set_pattern("%C-%m-%d %H:%M:%S.%e %L %s:%# %P:%t %v");
+  logger->set_pattern("%C-%m-%d %H:%M:%S.%e %L %P:%t %v");
+  logger->set_level(spdlog::level::trace);
   logger->flush_on(spdlog::level::debug);
 #else
   logger->set_pattern("%C-%m-%d %H:%M:%S.%e %L %v");
+  logger->set_level(spdlog::level::info);
   logger->flush_on(spdlog::level::err);
 #endif
 

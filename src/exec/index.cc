@@ -20,6 +20,7 @@
 namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
+namespace constant = upcite::constant;
 
 dstree::Index::Index(Config &config) :
     config_(config),
@@ -88,7 +89,7 @@ RESPONSE dstree::Index::insert(ID_TYPE batch_series_id) {
 }
 
 RESPONSE dstree::Index::filter_initialize(dstree::Node &node,
-                                      ID_TYPE *filter_id) {
+                                          ID_TYPE *filter_id) {
   if (node.is_leaf()) {
     node.implant_filter(*filter_id, filter_train_query_tsr_);
 
@@ -189,11 +190,11 @@ struct SearchCache {
   SearchCache(ID_TYPE thread_id,
               VALUE_TYPE *m256_fetch_cache,
               dstree::Answer *answer,
-              pthread_rwlock_t *answer_lock,
+              pthread_mutex_t *answer_mutex,
               std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE,
                                                          std::vector<dstree::NODE_DISTNCE>,
                                                          dstree::Compare>> leaf_min_heap,
-              pthread_rwlock_t *leaf_pq_lock,
+              pthread_mutex_t *leaf_pq_mutex,
               ID_TYPE *visited_node_counter,
               ID_TYPE *visited_series_counter,
               pthread_mutex_t *log_mutex) :
@@ -202,9 +203,9 @@ struct SearchCache {
       query_series_ptr_(nullptr),
       m256_fetch_cache_(m256_fetch_cache),
       answer_(answer),
-      answer_lock_(answer_lock),
+      answer_mutex_(answer_mutex),
       leaf_min_heap_(leaf_min_heap),
-      leaf_pq_lock_(leaf_pq_lock),
+      leaf_pq_mutex_(leaf_pq_mutex),
       visited_node_counter_(visited_node_counter),
       visited_series_counter_(visited_series_counter),
       log_mutex_(log_mutex) {}
@@ -217,11 +218,11 @@ struct SearchCache {
   VALUE_TYPE *m256_fetch_cache_;
 
   dstree::Answer *answer_;
-  pthread_rwlock_t *answer_lock_;
+  pthread_mutex_t *answer_mutex_;
 
   std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE, std::vector<dstree::NODE_DISTNCE>, dstree::Compare>>
       leaf_min_heap_;
-  pthread_rwlock_t *leaf_pq_lock_;
+  pthread_mutex_t *leaf_pq_mutex_;
 
   ID_TYPE *visited_node_counter_;
   ID_TYPE *visited_series_counter_;
@@ -239,43 +240,79 @@ void search_thread_F(const SearchCache &search_cache) {
   VALUE_TYPE node2visit_lbdistance;
   VALUE_TYPE local_nn_distance;
 
-  pthread_rwlock_wrlock(search_cache.answer_lock_);
+  pthread_mutex_lock(search_cache.answer_mutex_);
   VALUE_TYPE local_bsf = search_cache.answer_->get_bsf();
-  pthread_rwlock_unlock(search_cache.answer_lock_);
+  pthread_mutex_unlock(search_cache.answer_mutex_);
 
 #ifdef DEBUG
 #ifndef DEBUGGED
-  pthread_mutex_lock(search_cache.log_mutex_);
-
-  // boost::format is not thread safe
-  // https://stackoverflow.com/questions/51566505/boostformat-appears-to-not-be-thread-safe-because-stdctypecharnarrow
-  MALAT_LOG(search_cache.logger_.get().logger, trivial::info) << boost::format(
-        "filter query %d thread %d initial bsf %f before %d node")
-        % search_cache.query_id_
-        % search_cache.thread_id_
-        % local_bsf
-        % search_cache.leaf_min_heap_.get().size();
-
-  pthread_mutex_unlock(search_cache.log_mutex_);
+  pthread_mutex_lock(search_cache.leaf_pq_lock_);
+  spdlog::info("filter query {:d} thread {:d} initial bsf {:.3f} before {:d} nodes",
+               search_cache.query_id_,
+               search_cache.thread_id_,
+               local_bsf,
+               search_cache.leaf_min_heap_.get().size());
+  pthread_mutex_unlock(search_cache.leaf_pq_lock_);
 #endif
 #endif
 
   while (true) {
-    pthread_rwlock_wrlock(search_cache.leaf_pq_lock_);
+//    spdlog::info("filter query {:d} thread {:d} before wrlock",
+//                search_cache.query_id_,
+//                search_cache.thread_id_);
+
+    pthread_mutex_lock(search_cache.leaf_pq_mutex_);
+
+//    spdlog::info("filter query {:d} thread {:d} after wrlock",
+//                search_cache.query_id_,
+//                search_cache.thread_id_);
+
     if (search_cache.leaf_min_heap_.get().empty()) {
-      pthread_rwlock_unlock(search_cache.leaf_pq_lock_);
+//      spdlog::info("filter query {:d} thread {:d} before empty unlock",
+//                  search_cache.query_id_,
+//                  search_cache.thread_id_);
+
+      pthread_mutex_unlock(search_cache.leaf_pq_mutex_);
+
+//      spdlog::info("filter query {:d} thread {:d} after empty unlock",
+//                  search_cache.query_id_,
+//                  search_cache.thread_id_);
 
       break;
     } else {
       std::tie(node_to_visit, node2visit_lbdistance) = search_cache.leaf_min_heap_.get().top();
       search_cache.leaf_min_heap_.get().pop();
 
-      pthread_rwlock_unlock(search_cache.leaf_pq_lock_);
+//      spdlog::info("filter query {:d} thread {:d} before pop unlock",
+//                  search_cache.query_id_,
+//                  search_cache.thread_id_);
+
+      pthread_mutex_unlock(search_cache.leaf_pq_mutex_);
+
+//      spdlog::info("filter query {:d} thread {:d} after pop unlock",
+//                  search_cache.query_id_,
+//                  search_cache.thread_id_);
+#ifdef DEBUG
+#ifndef DEBUGGED
+      pthread_mutex_lock(search_cache.leaf_pq_mutex_);
+      spdlog::info("filter query {:d} thread {:d} visit node {:d} before {:d} nodes",
+                  search_cache.query_id_,
+                  search_cache.thread_id_,
+                  node_to_visit.get().get_id(),
+                  search_cache.leaf_min_heap_.get().size());
+      pthread_mutex_unlock(search_cache.leaf_pq_mutex_);
+#endif
+#endif
     }
 
     if (node_to_visit.get().has_filter()) {
       local_nn_distance = node_to_visit.get().search(
           search_cache.query_series_ptr_, search_cache.m256_fetch_cache_);
+
+//      spdlog::info("filter query {:d} thread {:d} local_nn_distance = {:.3f}",
+//                   search_cache.query_id_,
+//                   search_cache.thread_id_,
+//                   local_nn_distance);
 
       node_to_visit.get().push_filter_example(local_bsf, local_nn_distance);
     } else {
@@ -283,26 +320,46 @@ void search_thread_F(const SearchCache &search_cache) {
           search_cache.query_series_ptr_, search_cache.m256_fetch_cache_, local_bsf);
     }
 
+//    spdlog::info("filter query {:d} thread {:d} before mutex_lock",
+//                search_cache.query_id_,
+//                search_cache.thread_id_);
+
     pthread_mutex_lock(search_cache.log_mutex_);
+
+//    spdlog::info("filter query {:d} thread {:d} after mutex_lock",
+//                search_cache.query_id_,
+//                search_cache.thread_id_);
+
     *search_cache.visited_node_counter_ += 1;
     *search_cache.visited_series_counter_ += node_to_visit.get().get_size();
+
+//    spdlog::info("filter query {:d} thread {:d} before mutex_unlock",
+//                search_cache.query_id_,
+//                search_cache.thread_id_);
+
     pthread_mutex_unlock(search_cache.log_mutex_);
 
+//    spdlog::info("filter query {:d} thread {:d} after mutex_unlock",
+//                search_cache.query_id_,
+//                search_cache.thread_id_);
+
     if (local_nn_distance < local_bsf) {
-      pthread_rwlock_wrlock(search_cache.answer_lock_);
+      pthread_mutex_lock(search_cache.answer_mutex_);
       search_cache.answer_->push_bsf(local_nn_distance);
 
       local_bsf = search_cache.answer_->get_bsf();
-      pthread_rwlock_unlock(search_cache.answer_lock_);
+      pthread_mutex_unlock(search_cache.answer_mutex_);
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
-      spdlog::info("filter query {:d} thread {:d} update bsf {:.3f} after node {:d} series {:d}",
-                   search_cache.query_id_,
-                   search_cache.thread_id_,
-                   local_nn_distance,
-                   *search_cache.visited_node_counter_,
-                   *search_cache.visited_series_counter_);
+      if (local_bsf > local_nn_distance - constant::EPSILON) {
+        spdlog::info("filter query {:d} thread {:d} update bsf {:.3f} after node {:d} series {:d}",
+                     search_cache.query_id_,
+                     search_cache.thread_id_,
+                     local_nn_distance,
+                     *search_cache.visited_node_counter_,
+                     *search_cache.visited_series_counter_);
+      }
 //#endif
 #endif
     }
@@ -318,9 +375,13 @@ RESPONSE dstree::Index::filter_collect_mthread() {
 
   auto answer = std::make_unique<dstree::Answer>(config_.get().n_nearest_neighbor_, -1);
 
-  std::unique_ptr<pthread_rwlock_t> answer_lock = std::make_unique<pthread_rwlock_t>();
-  std::unique_ptr<pthread_rwlock_t> leaf_pq_lock = std::make_unique<pthread_rwlock_t>();
+  std::unique_ptr<pthread_mutex_t> answer_mutex = std::make_unique<pthread_mutex_t>();
+  std::unique_ptr<pthread_mutex_t> leaf_pq_mutex = std::make_unique<pthread_mutex_t>();
   std::unique_ptr<pthread_mutex_t> log_mutex = std::make_unique<pthread_mutex_t>();
+
+  pthread_mutex_init(answer_mutex.get(), nullptr);
+  pthread_mutex_init(leaf_pq_mutex.get(), nullptr);
+  pthread_mutex_init(log_mutex.get(), nullptr);
 
   std::vector<SearchCache> search_caches;
   std::stack<std::reference_wrapper<dstree::Node>> node_stack;
@@ -329,9 +390,9 @@ RESPONSE dstree::Index::filter_collect_mthread() {
     search_caches.emplace_back(thread_id,
                                m256_fetch_cache + 8 * thread_id,
                                answer.get(),
-                               answer_lock.get(),
+                               answer_mutex.get(),
                                std::ref(leaf_min_heap_),
-                               leaf_pq_lock.get(),
+                               leaf_pq_mutex.get(),
                                &visited_node_counter,
                                &visited_series_counter,
                                log_mutex.get());
@@ -388,10 +449,10 @@ RESPONSE dstree::Index::filter_collect_mthread() {
     }
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
     spdlog::info("filter query {:d} enqueued {:d} nodes",
                  query_id, leaf_min_heap_.size());
-//#endif
+#endif
 #endif
 
     std::vector<std::thread> threads;
@@ -431,11 +492,11 @@ struct TrainCache {
   TrainCache(ID_TYPE thread_id,
              at::cuda::CUDAStream stream,
              std::stack<std::reference_wrapper<dstree::Filter>> &filter_cache,
-             pthread_rwlock_t *filter_cache_lock) :
+             pthread_mutex_t *filter_cache_mutex) :
       thread_id_(thread_id),
       stream_(stream),
       filter_cache_(filter_cache),
-      filter_cache_lock_(filter_cache_lock) {}
+      filter_cache_mutex_(filter_cache_mutex) {}
   ~TrainCache() = default;
 
   ID_TYPE thread_id_;
@@ -443,7 +504,7 @@ struct TrainCache {
   at::cuda::CUDAStream stream_;
 
   std::stack<std::reference_wrapper<dstree::Filter>> &filter_cache_;
-  pthread_rwlock_t *filter_cache_lock_;
+  pthread_mutex_t *filter_cache_mutex_;
 };
 
 void train_thread_F(TrainCache &train_cache) {
@@ -451,16 +512,16 @@ void train_thread_F(TrainCache &train_cache) {
   at::cuda::CUDAStreamGuard guard(train_cache.stream_); // compiles with libtorch-gpu
 
   while (true) {
-    pthread_rwlock_wrlock(train_cache.filter_cache_lock_);
+    pthread_mutex_lock(train_cache.filter_cache_mutex_);
     if (train_cache.filter_cache_.empty()) {
-      pthread_rwlock_unlock(train_cache.filter_cache_lock_);
+      pthread_mutex_unlock(train_cache.filter_cache_mutex_);
 
       break;
     } else {
       std::reference_wrapper<dstree::Filter> filter = train_cache.filter_cache_.top();
       train_cache.filter_cache_.pop();
 
-      pthread_rwlock_unlock(train_cache.filter_cache_lock_);
+      pthread_mutex_unlock(train_cache.filter_cache_mutex_);
 
       filter.get().train();
     }
@@ -473,7 +534,7 @@ RESPONSE dstree::Index::filter_train_mthread() {
   assert(torch::cuda::is_available());
 
   std::stack<std::reference_wrapper<dstree::Filter>> filters;
-  std::unique_ptr<pthread_rwlock_t> filter_stack_lock = std::make_unique<pthread_rwlock_t>();
+  std::unique_ptr<pthread_mutex_t> filter_stack_mutex = std::make_unique<pthread_mutex_t>();
 
   std::stack<std::reference_wrapper<dstree::Node>> node_stack;
   node_stack.push(std::ref(*root_));
@@ -513,7 +574,7 @@ RESPONSE dstree::Index::filter_train_mthread() {
     train_caches.emplace_back(std::make_unique<TrainCache>(thread_id,
                                                            std::move(new_stream),
                                                            std::ref(filters),
-                                                           filter_stack_lock.get()));
+                                                           filter_stack_mutex.get()));
   }
 
   std::vector<std::thread> threads;
@@ -560,14 +621,15 @@ RESPONSE dstree::Index::train() {
 
   if (config_.get().filter_train_is_gpu_) {
     // TODO support multiple devices
-    device_ = std::make_unique<torch::Device>(torch::kCUDA, static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
+    device_ = std::make_unique<torch::Device>(torch::kCUDA,
+                                              static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
   } else {
     device_ = std::make_unique<torch::Device>(torch::kCPU);
   }
 
   filter_train_query_tsr_ = torch::from_blob(filter_train_query_ptr_,
-                                         {config_.get().filter_train_nexample_, config_.get().series_length_},
-                                         torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
+                                             {config_.get().filter_train_nexample_, config_.get().series_length_},
+                                             torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
   filter_train_query_tsr_ = filter_train_query_tsr_.to(*device_);
 
   ID_TYPE filter_id = 0;
@@ -643,8 +705,8 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
 
   if (config_.get().require_neurofilter_) {
     filter_query_tsr_ = torch::from_blob(series_ptr,
-                                     {1, config_.get().series_length_},
-                                     torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
+                                         {1, config_.get().series_length_},
+                                         torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
     filter_query_tsr_ = filter_query_tsr_.to(*device_);
   }
 
@@ -654,15 +716,30 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
     resident_node = resident_node.get().route(series_ptr);
   }
 
-  ID_TYPE resident_node_id = resident_node.get().get_id();
-
   ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
   ID_TYPE nfpruned_node_counter = 0, nfpruned_series_counter = 0;
 
   resident_node.get().search(series_ptr, *answer, visited_node_counter, visited_series_counter);
 
   if (config_.get().is_exact_search_) {
-    leaf_min_heap_.push(std::make_tuple(resident_node, 0));
+
+//#ifdef DEBUG
+//    //#ifndef DEBUGGED
+//    spdlog::debug("query {:d} heap_size {:d}",
+//                  answer->query_id_,
+//                  leaf_min_heap_.size());
+//    //#endif
+//#endif
+
+    leaf_min_heap_.push(std::make_tuple(std::ref(*root_), root_->cal_lower_bound_EDsquare(series_ptr)));
+
+//#ifdef DEBUG
+//    //#ifndef DEBUGGED
+//    spdlog::debug("query {:d} root_id {:d}",
+//                  answer->query_id_,
+//                  root_->get_id());
+//    //#endif
+//#endif
 
     // WARN undefined behaviour
     std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
@@ -685,29 +762,65 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
 
       leaf_min_heap_.pop();
 
+//#ifdef DEBUG
+//      //#ifndef DEBUGGED
+//      spdlog::debug("query {:d} node_id {:d} is_leaf {:b}",
+//                    answer->query_id_,
+//                    node_to_visit.get().get_id(),
+//                    node_to_visit.get().is_leaf());
+//      //#endif
+//#endif
+
       if (node_to_visit.get().is_leaf()) {
+
+//#ifdef DEBUG
+//        //#ifndef DEBUGGED
+//        spdlog::debug("query {:d} node_id {:d} node_c {:d} < node_m {:d}, series_c {:d} < series_m {:d}",
+//                      answer->query_id_,
+//                      node_to_visit.get().get_id(),
+//                      visited_node_counter,
+//                      config_.get().search_max_nnode_,
+//                      visited_series_counter,
+//                      config_.get().search_max_nseries_);
+//        //#endif
+//#endif
+
         if (visited_node_counter < config_.get().search_max_nnode_
             && visited_series_counter < config_.get().search_max_nseries_) {
-          if (node_to_visit.get().get_id() != resident_node_id) {
+
+//#ifdef DEBUG
+//          //#ifndef DEBUGGED
+//          spdlog::debug("query {:d} node_id {:d} resident_id {:d}",
+//                        answer->query_id_,
+//                        node_to_visit.get().get_id(),
+//                        resident_node.get().get_id());
+//          //#endif
+//#endif
+
+          if (node_to_visit.get().get_id() != resident_node.get().get_id()) {
+
+//#ifdef DEBUG
+//            //#ifndef DEBUGGED
+//            spdlog::debug("query {:d} node_id {:d} node2visit_lbdistance {:.3f} bsf {:.3f}",
+//                          answer->query_id_,
+//                          node_to_visit.get().get_id(),
+//                          node2visit_lbdistance,
+//                          answer->get_bsf());
+//            //#endif
+//#endif
+
             if (config_.get().examine_ground_truth_ || answer->is_bsf(node2visit_lbdistance)) {
-//              if (node_to_visit->neurofilter_ != nullptr
-//                  && node_to_visit->neurofilter_->infer(filter_query_tsr_) < answer->get_bsf()) {
-//                node_to_visit->search(series_ptr, answer, visited_node_counter, visited_series_counter);
-//              } else {
-//                nfpruned_node_counter += 1;
-//                nfpruned_series_counter += node_to_visit->get_size();
-//              }
               if (node_to_visit.get().has_filter()) {
                 VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
 
 #ifdef DEBUG
-                //#ifndef DEBUGGED
+#ifndef DEBUGGED
                 spdlog::debug("query {:d} node_id {:d} predicted_nn_distance {:.3f} bsf {:.3f}",
                               answer->query_id_,
                               node_to_visit.get().get_id(),
                               predicted_nn_distance,
                               answer->get_bsf());
-                //#endif
+#endif
 #endif
 
                 if (predicted_nn_distance < answer->get_bsf()) {

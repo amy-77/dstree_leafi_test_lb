@@ -641,14 +641,16 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
   VALUE_TYPE distance;
 
   while (db_series_ptr != nullptr) {
-//    VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_->series_length_);
-    if (bsf_distance > 0) {
-      distance = upcite::cal_early_EDsquare_SIMD_8(
-          db_series_ptr, query_series_ptr, config_.get().series_length_, m256_fetch_cache, bsf_distance);
-    } else {
-      distance = upcite::cal_EDsquare_SIMD_8(
-          db_series_ptr, query_series_ptr, config_.get().series_length_, m256_fetch_cache);
-    }
+    VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_.get().series_length_);
+
+    // TODO resolve the conflict between multithreading and SIMD
+//    if (bsf_distance > 0) {
+//      distance = upcite::cal_early_EDsquare_SIMD_8(
+//          db_series_ptr, query_series_ptr, config_.get().series_length_, m256_fetch_cache, bsf_distance);
+//    } else {
+//      distance = upcite::cal_EDsquare_SIMD_8(
+//          db_series_ptr, query_series_ptr, config_.get().series_length_, m256_fetch_cache);
+//    }
 
     if (distance < local_bsf) {
       local_bsf = distance;

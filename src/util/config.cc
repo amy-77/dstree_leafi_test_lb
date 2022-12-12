@@ -57,7 +57,9 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_train_clip_grad_max_norm_(1),
     filter_train_is_mthread_(false),
     filter_collect_nthread_(-1),
-    filter_train_nthread_(4) {
+    filter_train_nthread_(4),
+    filter_remove_square_(false),
+    filter_train_val_split_(0.9) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -137,7 +139,11 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("filter_collect_nthread", po::value<ID_TYPE>(&filter_collect_nthread_)->default_value(-1),
        "Number of threads to collect neurofilter train set; default filter_train_nthread")
       ("filter_train_nthread", po::value<ID_TYPE>(&filter_train_nthread_)->default_value(4),
-       "Number of threads to train neurofilters");
+       "Number of threads to train neurofilters")
+      ("filter_remove_square", po::bool_switch(&filter_remove_square_)->default_value(false),
+       "Whether to use real distance (instead of square distances) to train filters")
+      ("filter_train_val_split", po::value<VALUE_TYPE>(&filter_train_val_split_)->default_value(0.9),
+       "Neurofilter train train/val split ratio");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -224,126 +230,54 @@ void dstree::Config::log() {
   spdlog::info("query_filepath = {:s}", query_filepath_);
   spdlog::info("is_znormalized = {:b}", is_znormalized_);
 
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "db_filepath = %s")
-//        % db_filepath_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "query_filepath = %s")
-//        % query_filepath_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "is_znormalized = %d")
-//        % is_znormalized_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "db_size = %d")
-//        % db_nseries_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "query_size = %d")
-//        % query_nseries_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "leaf_size = %d")
-//        % leaf_max_nseries_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "batch_load_nseries = %d")
-//        % batch_load_nseries_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "default_nbuffer = %d")
-//        % default_nbuffer_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "on_disk = %d")
-//        % on_disk_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "index_persist_folderpath = %s")
-//        % index_persist_folderpath_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "index_persist_file_postfix = %s")
-//        % index_persist_file_postfix_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "node_nchild = %d")
-//        % node_nchild_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "vertical_split_nsubsegment = %d")
-//        % vertical_split_nsubsegment_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "vertical_split_gain_tradeoff_factor = %.3f")
-//        % vertical_split_gain_tradeoff_factor_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "is_exact_search = %d")
-//        % is_exact_search_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "search_max_nseries = %d")
-//        % search_max_nseries_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "search_max_nnode = %d")
-//        % search_max_nnode_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "n_nearest_neighbor = %d")
-//        % n_nearest_neighbor_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "is_ground_truth = %d")
-//        % examine_ground_truth_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "require_neurofilter = %d")
-//        % require_neurofilter_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_dim_latent = %d")
-//        % filter_dim_latent_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_leaky_relu_negative_slope = %.3f")
-//        % filter_leaky_relu_negative_slope_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_dropout_p = %.3f")
-//        % filter_train_dropout_p_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_is_gpu = %d")
-//        % filter_train_is_gpu_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_infer_is_gpu = %d")
-//        % filter_infer_is_gpu_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_device_id = %d")
-//        % filter_device_id_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_nexample = %d")
-//        % filter_train_nexample_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_batchsize = %d")
-//        % filter_train_batchsize_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_nepoch = %d")
-//        % filter_train_nepoch_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_learning_rate = %.3f")
-//        % filter_train_learning_rate_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_min_lr = %.3f")
-//        % filter_train_min_lr_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_clip_grad_norm_type = %.3f")
-//        % filter_train_clip_grad_norm_type_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_clip_grad_max_norm = %.3f")
-//        % filter_train_clip_grad_max_norm_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_query_filepath = %s")
-//        % filter_query_filepath_;
-//
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_mthread = %d")
-//        % filter_train_is_mthread_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_collect_nthread = %d")
-//        % filter_collect_nthread_;
-//  MALAT_LOG(logger.logger, trivial::info) << boost::format(
-//        "filter_train_nthread = %d")
-//        % filter_train_nthread_;
+  spdlog::info("db_nseries = {:d}", db_nseries_);
+  spdlog::info("query_nseries = {:d}", query_nseries_);
+  spdlog::info("leaf_max_nseries = {:d}", leaf_max_nseries_);
+
+  spdlog::info("batch_load_nseries = {:d}", batch_load_nseries_);
+  spdlog::info("default_nbuffer = {:d}", default_nbuffer_);
+
+  spdlog::info("on_disk = {:b}", on_disk_);
+  spdlog::info("index_persist_folderpath = {:s}", index_persist_folderpath_);
+  spdlog::info("index_persist_file_postfix = {:s}", index_persist_file_postfix_);
+
+  spdlog::info("node_nchild = {:d}", node_nchild_);
+  spdlog::info("vertical_split_nsubsegment = {:d}", vertical_split_nsubsegment_);
+  spdlog::info("vertical_split_gain_tradeoff_factor = {:.3f}", vertical_split_gain_tradeoff_factor_);
+
+  spdlog::info("is_exact_search = {:b}", is_exact_search_);
+  spdlog::info("search_max_nseries = {:d}", search_max_nseries_);
+  spdlog::info("search_max_nnode = {:d}", search_max_nnode_);
+
+  spdlog::info("n_nearest_neighbor = {:d}", n_nearest_neighbor_);
+
+  spdlog::info("examine_ground_truth = {:d}", examine_ground_truth_);
+
+  spdlog::info("require_neurofilter = {:b}", require_neurofilter_);
+  spdlog::info("filter_dim_latent = {:d}", filter_dim_latent_);
+  spdlog::info("filter_leaky_relu_negative_slope = {:.3f}", filter_leaky_relu_negative_slope_);
+  spdlog::info("filter_train_dropout_p_ = {:.3f}", filter_train_dropout_p_);
+
+  spdlog::info("filter_train_is_gpu_ = {:b}", filter_train_is_gpu_);
+  spdlog::info("filter_infer_is_gpu = {:b}", filter_infer_is_gpu_);
+  spdlog::info("filter_device_id = {:d}", filter_device_id_);
+
+  spdlog::info("filter_train_nexample = {:d}", filter_train_nexample_);
+  spdlog::info("filter_train_batchsize = {:d}", filter_train_batchsize_);
+  spdlog::info("filter_train_nepoch = {:d}", filter_train_nepoch_);
+  spdlog::info("filter_train_learning_rate = {:.3f}", filter_train_learning_rate_);
+  spdlog::info("filter_train_min_lr = {:.3f}", filter_train_min_lr_);
+
+  spdlog::info("filter_train_clip_grad_norm_type = {:.1f}", filter_train_clip_grad_norm_type_);
+  spdlog::info("filter_train_clip_grad_max_norm = {:.3f}", filter_train_clip_grad_max_norm_);
+
+  spdlog::info("filter_query_filepath = {:s}", filter_query_filepath_);
+
+  spdlog::info("filter_train_is_mthread = {:b}", filter_train_is_mthread_);
+  spdlog::info("filter_collect_nthread = {:d}", filter_collect_nthread_);
+  spdlog::info("filter_train_nthread = {:d}", filter_train_nthread_);
+
+  spdlog::info("filter_remove_square = {:b}", filter_remove_square_);
+
+  spdlog::info("filter_train_val_split = {:.3f}", filter_train_val_split_);
 }

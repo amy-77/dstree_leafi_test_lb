@@ -66,6 +66,7 @@ class Config {
   ID_TYPE filter_train_nepoch_;
   VALUE_TYPE filter_train_learning_rate_;
   VALUE_TYPE filter_train_min_lr_;
+  bool filter_train_clip_grad_;
   VALUE_TYPE filter_train_clip_grad_norm_type_;
   VALUE_TYPE filter_train_clip_grad_max_norm_;
 

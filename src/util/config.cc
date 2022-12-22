@@ -53,6 +53,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_train_nepoch_(100),
     filter_train_learning_rate_(0.01),
     filter_train_min_lr_(0.0001),
+    filter_train_clip_grad_(false),
     filter_train_clip_grad_norm_type_(2),
     filter_train_clip_grad_max_norm_(1),
     filter_train_is_mthread_(false),
@@ -128,6 +129,8 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Neurofilter train learning rate")
       ("filter_train_min_lr", po::value<VALUE_TYPE>(&filter_train_min_lr_)->default_value(0.0001),
        "Neurofilter train minimal learning rate, for adjusting learning rates")
+      ("filter_train_clip_grad", po::bool_switch(&filter_train_clip_grad_)->default_value(false),
+       "Whether to train neurofilters with gradient clipping")
       ("clip_grad_norm_type", po::value<VALUE_TYPE>(&filter_train_clip_grad_norm_type_)->default_value(2),
        "Gradient clipping norm type")
       ("clip_grad_max_norm", po::value<VALUE_TYPE>(&filter_train_clip_grad_max_norm_)->default_value(1),

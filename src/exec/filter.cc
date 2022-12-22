@@ -14,6 +14,7 @@
 #include <c10/cuda/CUDAStream.h>
 
 #include "str.h"
+#include "scheduler.h"
 
 namespace dstree = upcite::dstree;
 
@@ -115,51 +116,68 @@ RESPONSE dstree::Filter::train() {
 
 #ifdef DEBUG
   if (!node_lower_bound_distances_.empty()) {
-    spdlog::debug("stream {:d} filter {:d} node distances = {:s}",
+    spdlog::debug("stream {:d} filter {:d} d_node_sq = {:s}",
                   stream_id, id_, upcite::get_str(node_lower_bound_distances_.data(), train_size_));
   }
 
-  spdlog::debug("stream {:d} filter {:d} bsf distances = {:s}",
+  spdlog::debug("stream {:d} filter {:d} d_bsf_sq = {:s}",
                 stream_id, id_, upcite::get_str(bsf_distances_.data(), train_size_));
 
-  spdlog::debug("stream {:d} filter {:d} nn distances = {:s}",
-                stream_id, id_, upcite::get_str(nn_distances_.data(), train_size_));
 #endif
 
   if (config_.get().filter_remove_square_) {
     for (ID_TYPE i = 0; i < train_size_; ++i) {
       nn_distances_[i] = sqrt(nn_distances_[i]);
     }
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-    spdlog::debug("stream {:d} filter {:d} nn sqrt = {:s}",
-                  stream_id, id_, upcite::get_str(nn_distances_.data(), train_size_));
-#endif
-#endif
   }
 
+#ifdef DEBUG
+  spdlog::debug("stream {:d} filter {:d} d_nn{:s} = {:s}",
+                stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
+                upcite::get_str(nn_distances_.data(), train_size_));
+#endif
+
   ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
-//    int num_valid_examples = train_size_ - num_train_examples;
 
   auto dataset = SeriesDataset(shared_train_queries_, nn_distances_, num_train_examples, *device_);
   auto data_loader = torch::data::make_data_loader<torch::data::samplers::RandomSampler>(
       dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
 
+  ID_TYPE num_valid_examples = train_size_ - num_train_examples;
+  auto valid_data = shared_train_queries_.get().index({torch::indexing::Slice(num_train_examples, train_size_)});
+  auto valid_target = torch::from_blob(nn_distances_.data() + num_train_examples,
+                                       num_valid_examples,
+                                       torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+
   torch::optim::SGD optimizer(model_->parameters(), config_.get().filter_train_learning_rate_);
+  upcite::optim::ReduceLROnPlateau lr_scheduler = upcite::optim::ReduceLROnPlateau(optimizer);
+
+//  torch::nn::HuberLoss huber_loss(torch::nn::HuberLossOptions().reduction(torch::kMean).delta(1.0));
+  torch::nn::MSELoss mse_loss(torch::nn::MSELossOptions().reduction(torch::kMean));
 
 #ifdef DEBUG
-  std::vector<float> global_losses, local_losses;
-  global_losses.reserve(config_.get().filter_train_nepoch_);
-  local_losses.reserve(num_train_examples / config_.get().filter_train_batchsize_ + 1);
+  std::vector<float> train_losses, valid_losses, batch_train_losses;
+  train_losses.reserve(config_.get().filter_train_nepoch_);
+  batch_train_losses.reserve(num_train_examples / config_.get().filter_train_batchsize_ + 1);
+
+  valid_losses.reserve(config_.get().filter_train_nepoch_);
 #endif
 
   for (ID_TYPE epoch = 0; epoch < config_.get().filter_train_nepoch_; ++epoch) {
-    adjust_learning_rate(optimizer,
-                         config_.get().filter_train_learning_rate_,
-                         config_.get().filter_train_min_lr_,
-                         epoch,
-                         config_.get().filter_train_nepoch_);
+    // TODO refactor to SigmoidLR
+//    adjust_learning_rate(optimizer,
+//                         config_.get().filter_train_learning_rate_,
+//                         config_.get().filter_train_min_lr_,
+//                         epoch,
+//                         config_.get().filter_train_nepoch_);
+
+    model_->train();
+
+#ifdef DEBUG
+//#ifdef DEBUGGED
+    bool is_train_logged = false;
+//#endif
+#endif
 
     for (auto &batch : *data_loader) {
       auto batch_data = batch.data, batch_target = batch.target;
@@ -167,31 +185,81 @@ RESPONSE dstree::Filter::train() {
       optimizer.zero_grad();
 
       torch::Tensor prediction = model_->forward(batch_data);
-      torch::Tensor loss = torch::mse_loss(prediction, batch_target);
+
+//      torch::Tensor loss = huber_loss->forward(prediction, batch_target);
+      torch::Tensor loss = mse_loss->forward(prediction, batch_target);
 
       loss.backward();
-      auto norm = torch::nn::utils::clip_grad_norm_(model_->parameters(),
-                                                    config_.get().filter_train_clip_grad_max_norm_,
-                                                    config_.get().filter_train_clip_grad_norm_type_);
+
+      if (config_.get().filter_train_clip_grad_) {
+        auto norm = torch::nn::utils::clip_grad_norm_(model_->parameters(),
+                                                      config_.get().filter_train_clip_grad_max_norm_,
+                                                      config_.get().filter_train_clip_grad_norm_type_);
+      }
       optimizer.step();
 
 #ifdef DEBUG
-      local_losses.emplace_back(loss.detach().item<float>());
+      batch_train_losses.push_back(loss.detach().item<float>());
+
+//#ifdef DEBUGGED
+      if (!is_train_logged) {
+        auto target_cpu = batch_target.detach().cpu();
+        spdlog::info("stream {:d} filter {:d} t{:d} b0 d_nn{:s} = {:s}",
+                     stream_id, id_, epoch, config_.get().filter_remove_square_ ? "" : "_sq",
+                     upcite::get_str(target_cpu.accessor<VALUE_TYPE, 1>().data(), num_valid_examples));
+
+        auto pred_cpu = prediction.detach().cpu();
+        spdlog::info("stream {:d} filter {:d} t{:d} b0 d_pred{:s} = {:s}",
+                     stream_id, id_, epoch, config_.get().filter_remove_square_ ? "" : "_sq",
+                     upcite::get_str(pred_cpu.accessor<VALUE_TYPE, 1>().data(), num_valid_examples));
+
+        is_train_logged = true;
+      }
+//#endif
 #endif
     }
 
 #ifdef DEBUG
-    global_losses.emplace_back(std::accumulate(local_losses.begin(), local_losses.end(), 0.0)
-                                   / static_cast<VALUE_TYPE>(local_losses.size()));
-    local_losses.clear();
+    train_losses.push_back(std::accumulate(batch_train_losses.begin(), batch_train_losses.end(), 0.0)
+                               / static_cast<VALUE_TYPE>(batch_train_losses.size()));
+    batch_train_losses.clear();
 #endif
+
+    model_->eval();
+    VALUE_TYPE valid_loss = 0;
+
+    {
+      torch::NoGradGuard no_grad;
+
+      torch::Tensor prediction = model_->forward(valid_data);
+
+//      torch::Tensor loss = huber_loss->forward(prediction, valid_targets);
+      torch::Tensor loss = mse_loss->forward(prediction, valid_target);
+
+      valid_loss = loss.detach().item<VALUE_TYPE>();
+
+#ifdef DEBUG
+      valid_losses.push_back(valid_loss);
+
+//#ifdef DEBUGGED
+      auto pred_cpu = prediction.detach().cpu();
+      spdlog::info("stream {:d} filter {:d} v{:d} d_pred{:s} = {:s}",
+                   stream_id, id_, epoch, config_.get().filter_remove_square_ ? "" : "_sq",
+                   upcite::get_str(pred_cpu.accessor<VALUE_TYPE, 1>().data(), num_valid_examples));
+//#endif
+#endif
+    }
+
+    lr_scheduler.check_step(valid_loss);
   }
 
 #ifdef DEBUG
-  spdlog::info("stream {:d} filter {:d} losses = {:s}",
-               stream_id, id_, upcite::get_str(global_losses.data(), config_.get().filter_train_nepoch_));
+  spdlog::debug("stream {:d} filter {:d} t_losses = {:s}",
+                stream_id, id_, upcite::get_str(train_losses.data(), config_.get().filter_train_nepoch_));
+  spdlog::debug("stream {:d} filter {:d} v_losses = {:s}",
+                stream_id, id_, upcite::get_str(valid_losses.data(), config_.get().filter_train_nepoch_));
 #endif
-  optimizer.zero_grad();
+
   for (const auto &parameter : model_->parameters()) {
     parameter.requires_grad_(false);
   }
@@ -202,26 +270,11 @@ RESPONSE dstree::Filter::train() {
 #ifdef DEBUG
   {
     torch::NoGradGuard no_grad;
+    auto prediction = model_->forward(shared_train_queries_).detach().to(torch::Device(torch::kCPU));
 
-    auto predictions = model_->forward(shared_train_queries_).detach().to(torch::Device(torch::kCPU));
-
-    spdlog::info("stream {:d} filter {:d} predictions = {:s}",
-                 stream_id, id_, upcite::get_str(predictions.accessor<VALUE_TYPE, 1>().data(), train_size_));
-
-    if (config_.get().filter_remove_square_) {
-      VALUE_TYPE *predictions_ptr = predictions.accessor<VALUE_TYPE, 1>().data();
-      VALUE_TYPE pred_square[train_size_];
-
-      for (ID_TYPE i = 0; i < train_size_; ++i) {
-        pred_square[i] = predictions_ptr[i] * predictions_ptr[i];
-      }
-
-      spdlog::debug("stream {:d} filter {:d} predictions = {:s}",
-                    stream_id, id_, upcite::get_str(pred_square, train_size_));
-    } else {
-      spdlog::info("stream {:d} filter {:d} predictions = {:s}",
-                   stream_id, id_, upcite::get_str(predictions.accessor<VALUE_TYPE, 1>().data(), train_size_));
-    }
+    spdlog::info("stream {:d} filter {:d} d_pred{:s} = {:s}",
+                 stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
+                 upcite::get_str(prediction.accessor<VALUE_TYPE, 1>().data(), train_size_));
   };
 #endif
 
@@ -253,7 +306,7 @@ VALUE_TYPE dstree::Filter::infer(torch::Tensor &query_series) const {
   if (is_trained_) {
     torch::NoGradGuard no_grad;
 
-    VALUE_TYPE pred = model_->infer(query_series).item<VALUE_TYPE>();
+    VALUE_TYPE pred = model_->forward(query_series).item<VALUE_TYPE>();
 
     if (config_.get().filter_remove_square_) {
       return pred * pred;

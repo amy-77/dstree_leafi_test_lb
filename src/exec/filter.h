@@ -43,7 +43,7 @@ class Filter {
 
   std::reference_wrapper<dstree::Config> config_;
 
-  std::unique_ptr<NFModel> model_;
+  std::unique_ptr<FilterModel> model_;
   std::unique_ptr<torch::Device> device_; // TODO ref?
 
   bool is_trained_;

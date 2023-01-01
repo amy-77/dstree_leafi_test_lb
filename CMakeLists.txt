@@ -54,4 +54,4 @@ target_link_libraries(${TARGET}
 
 install(TARGETS ${TARGET} DESTINATION ${PROJECT_SOURCE_DIR}/bin)
 
-#add_subdirectory(test) # not updated
+add_subdirectory(test) # not updated

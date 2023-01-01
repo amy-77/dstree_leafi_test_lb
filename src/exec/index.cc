@@ -814,13 +814,13 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
                 VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
 
 #ifdef DEBUG
-#ifndef DEBUGGED
+//#ifndef DEBUGGED
                 spdlog::debug("query {:d} node_id {:d} predicted_nn_distance {:.3f} bsf {:.3f}",
                               answer->query_id_,
                               node_to_visit.get().get_id(),
                               predicted_nn_distance,
                               answer->get_bsf());
-#endif
+//#endif
 #endif
 
                 if (predicted_nn_distance < answer->get_bsf()) {

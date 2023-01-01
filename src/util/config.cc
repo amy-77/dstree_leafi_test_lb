@@ -269,8 +269,9 @@ void dstree::Config::log() {
   spdlog::info("filter_train_batchsize = {:d}", filter_train_batchsize_);
   spdlog::info("filter_train_nepoch = {:d}", filter_train_nepoch_);
   spdlog::info("filter_train_learning_rate = {:.3f}", filter_train_learning_rate_);
-  spdlog::info("filter_train_min_lr = {:.3f}", filter_train_min_lr_);
+  spdlog::info("filter_train_min_lr = {:.7f}", filter_train_min_lr_);
 
+  spdlog::info("filter_train_clip_grad = {:b}", filter_train_clip_grad_);
   spdlog::info("filter_train_clip_grad_norm_type = {:.1f}", filter_train_clip_grad_norm_type_);
   spdlog::info("filter_train_clip_grad_max_norm = {:.3f}", filter_train_clip_grad_max_norm_);
 

@@ -47,7 +47,7 @@ class Filter {
   std::unique_ptr<torch::Device> device_; // TODO ref?
 
   bool is_trained_;
-  unsigned int train_size_;
+  ID_TYPE train_size_;
 
   std::reference_wrapper<torch::Tensor> shared_train_queries_;
   std::vector<VALUE_TYPE> bsf_distances_;

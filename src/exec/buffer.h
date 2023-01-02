@@ -68,8 +68,17 @@ class BufferManager {
     return batch_load_buffer_ + config_.get().series_length_ * series_batch_id;
   }
 
+  VALUE_TYPE *get_sketch_ptr(ID_TYPE series_batch_id) const {
+    return batch_load_sketch_buffer_ + config_.get().sketch_length_ * series_batch_id;
+  }
+
   EAPCA &get_series_eapca(ID_TYPE series_batch_id) const {
     return *batch_eapca_[series_batch_id];
+  }
+
+  RESPONSE emplace_series_eapca(std::unique_ptr<EAPCA> eapca) {
+    batch_eapca_.emplace_back(std::move(eapca));
+    return SUCCESS;
   }
 
   ID_TYPE load_buffer_size() const { return batch_nseries_; }
@@ -80,14 +89,17 @@ class BufferManager {
 
   Buffer &create_node_buffer(ID_TYPE node_id);
 
-  VALUE_TYPE *batch_load_buffer_;
-  std::vector<std::unique_ptr<EAPCA>> batch_eapca_;
-
  private:
   std::reference_wrapper<Config> config_;
 
-  ID_TYPE batch_series_offset_, batch_nseries_, loaded_nseries_;
   std::ifstream db_fin_;
+  ID_TYPE batch_series_offset_, batch_nseries_, loaded_nseries_;
+  VALUE_TYPE *batch_load_buffer_;
+  std::vector<std::unique_ptr<EAPCA>> batch_eapca_;
+
+  std::ifstream sketch_fin_;
+  VALUE_TYPE *batch_load_sketch_buffer_;
+
   VALUE_TYPE *batch_flush_buffer_;
 
   std::vector<std::unique_ptr<Buffer>> node_buffers_;

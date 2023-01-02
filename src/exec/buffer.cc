@@ -164,6 +164,11 @@ dstree::BufferManager::BufferManager(dstree::Config &config) :
 
   node_to_buffer_.reserve(config.default_nbuffer_);
   buffer_to_node_.reserve(config.default_nbuffer_);
+
+  if (config_.get().is_sketch_provided_) {
+    auto batch_sketch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config.sketch_length_ * batch_nseries_;
+    batch_load_sketch_buffer_ = static_cast<VALUE_TYPE *>(malloc(batch_sketch_nbytes));
+  }
 }
 
 dstree::BufferManager::~BufferManager() {
@@ -179,6 +184,17 @@ dstree::BufferManager::~BufferManager() {
 
   if (db_fin_.is_open()) {
     db_fin_.close();
+  }
+
+  if (config_.get().is_sketch_provided_) {
+    if (batch_load_sketch_buffer_) {
+      std::free(batch_load_sketch_buffer_);
+      batch_load_sketch_buffer_ = nullptr;
+    }
+
+    if (sketch_fin_.is_open()) {
+      sketch_fin_.close();
+    }
   }
 }
 
@@ -214,6 +230,21 @@ RESPONSE dstree::BufferManager::load_batch() {
 
       return FAILURE;
     }
+
+    if (config_.get().is_sketch_provided_) {
+      if (!fs::exists(config_.get().train_sketch_filepath_)) {
+        spdlog::error("database sketch filepath does not exist = {:s}", config_.get().train_sketch_filepath_);
+
+        return FAILURE;
+      }
+
+      sketch_fin_.open(config_.get().train_sketch_filepath_, std::ios::in | std::ios::binary);
+      if (!sketch_fin_.good()) {
+        spdlog::error("database sketch filepath cannot open = {:s}", config_.get().train_sketch_filepath_);
+
+        return FAILURE;
+      }
+    }
   } else if (loaded_nseries_ >= config_.get().db_nseries_) {
     return FAILURE;
   }
@@ -224,7 +255,8 @@ RESPONSE dstree::BufferManager::load_batch() {
   auto batch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * batch_nseries_;
 
   batch_series_offset_ = loaded_nseries_;
-  auto batch_bytes_offset = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * batch_series_offset_;
+  auto batch_bytes_offset =
+      static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * batch_series_offset_;
 
   db_fin_.seekg(batch_bytes_offset);
   db_fin_.read(reinterpret_cast<char *>(batch_load_buffer_), batch_nbytes);
@@ -234,6 +266,22 @@ RESPONSE dstree::BufferManager::load_batch() {
                   batch_nbytes, config_.get().db_filepath_, batch_bytes_offset);
 
     return FAILURE;
+  }
+
+  if (config_.get().is_sketch_provided_) {
+    auto batch_sketch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().sketch_length_ * batch_nseries_;
+    auto batch_sketch_bytes_offset =
+        static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().sketch_length_ * batch_series_offset_;
+
+    sketch_fin_.seekg(batch_sketch_bytes_offset);
+    sketch_fin_.read(reinterpret_cast<char *>(batch_load_sketch_buffer_), batch_sketch_nbytes);
+
+    if (sketch_fin_.fail()) {
+      spdlog::error("cannot read {:d} bytes from {:s} at {:d}",
+                    batch_sketch_nbytes, config_.get().train_sketch_filepath_, batch_sketch_bytes_offset);
+
+      return FAILURE;
+    }
   }
 
   loaded_nseries_ += batch_nseries_;
@@ -251,6 +299,8 @@ RESPONSE dstree::BufferManager::flush() {
   for (const auto &buffer : node_buffers_) {
     buffer->flush(batch_load_buffer_, batch_flush_buffer_, config_.get().series_length_);
   }
+
+  // TODO flush sketches
 
   return SUCCESS;
 }

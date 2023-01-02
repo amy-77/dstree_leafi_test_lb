@@ -60,7 +60,11 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_collect_nthread_(-1),
     filter_train_nthread_(4),
     filter_remove_square_(false),
-    filter_train_val_split_(0.9) {
+    filter_train_val_split_(0.9),
+    is_sketch_provided_(false),
+    sketch_length_(-1),
+    train_sketch_filepath_(""),
+    query_sketch_filepath_("") {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -71,6 +75,14 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Database file path")
       ("query_filepath", po::value<std::string>(&query_filepath_)->required(),
        "Query file path")
+      ("is_sketch_provided", po::bool_switch(&is_sketch_provided_)->default_value(false),
+       "Whether the sketch file has been provided")
+      ("sketch_length", po::value<ID_TYPE>(&sketch_length_)->default_value(-1),
+       "Sketch length")
+      ("train_sketch_filepath", po::value<std::string>(&train_sketch_filepath_),
+       "Database summarization file path")
+      ("query_sketch_filepath", po::value<std::string>(&query_sketch_filepath_),
+       "Query summarization file path")
       ("series_length", po::value<ID_TYPE>(&series_length_)->required(),
        "Series length")
       ("is_znormalized", po::bool_switch(&is_znormalized_)->default_value(false),
@@ -226,12 +238,31 @@ dstree::Config::Config(int argc, char *argv[]) :
       }
     }
   }
+
+  if (is_sketch_provided_) {
+    if (sketch_length_ == -1 || train_sketch_filepath_.size() < 2 || query_sketch_filepath_.size() < 2) {
+      std::cout << "Please specify sketch_length, train_sketch_filepath and query_sketch_filepath" << std::endl;
+      exit(-1);
+    }
+  } else if (train_sketch_filepath_.size() > 1) {
+    if (sketch_length_ == -1 || query_sketch_filepath_.size() < 2) {
+      std::cout << "Please specify sketch_length and query_sketch_filepath" << std::endl;
+      exit(-1);
+    }
+
+    is_sketch_provided_ = true;
+  }
 }
 
 void dstree::Config::log() {
   spdlog::info("db_filepath = {:s}", db_filepath_);
   spdlog::info("query_filepath = {:s}", query_filepath_);
   spdlog::info("is_znormalized = {:b}", is_znormalized_);
+
+  spdlog::info("is_sketch_provided = {:b}", is_sketch_provided_);
+  spdlog::info("sketch_length = {:d}", sketch_length_);
+  spdlog::info("train_sketch_filepath = {:s}", train_sketch_filepath_);
+  spdlog::info("query_sketch_filepath = {:s}", query_sketch_filepath_);
 
   spdlog::info("db_nseries = {:d}", db_nseries_);
   spdlog::info("query_nseries = {:d}", query_nseries_);

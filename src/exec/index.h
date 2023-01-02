@@ -42,7 +42,7 @@ class Index {
   RESPONSE dump();
 
   RESPONSE search();
-  RESPONSE search(ID_TYPE query_id, VALUE_TYPE *series_ptr);
+  RESPONSE search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr = nullptr);
 
  private:
   RESPONSE insert(ID_TYPE batch_series_id);

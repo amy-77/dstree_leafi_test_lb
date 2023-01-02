@@ -28,6 +28,11 @@ class Config {
   std::string db_filepath_;
   std::string query_filepath_;
 
+  bool is_sketch_provided_;
+  ID_TYPE sketch_length_;
+  std::string train_sketch_filepath_;
+  std::string query_sketch_filepath_;
+
   ID_TYPE series_length_;
   bool is_znormalized_;
 

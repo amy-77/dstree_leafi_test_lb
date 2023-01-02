@@ -66,10 +66,17 @@ RESPONSE dstree::Index::build() {
 }
 
 RESPONSE dstree::Index::insert(ID_TYPE batch_series_id) {
-  buffer_manager_->batch_eapca_.emplace_back(std::make_unique<dstree::EAPCA>(
-      buffer_manager_->get_series_ptr(batch_series_id),
-      config_.get().series_length_,
-      config_.get().vertical_split_nsubsegment_));
+  if (config_.get().is_sketch_provided_) {
+    buffer_manager_->emplace_series_eapca(std::move(std::make_unique<dstree::EAPCA>(
+        buffer_manager_->get_sketch_ptr(batch_series_id),
+        config_.get().sketch_length_,
+        config_.get().vertical_split_nsubsegment_)));
+  } else {
+    buffer_manager_->emplace_series_eapca(std::move(std::make_unique<dstree::EAPCA>(
+        buffer_manager_->get_series_ptr(batch_series_id),
+        config_.get().series_length_,
+        config_.get().vertical_split_nsubsegment_)));
+  }
   dstree::EAPCA &series_eapca = buffer_manager_->get_series_eapca(batch_series_id);
 
   std::reference_wrapper<dstree::Node> target_node = std::ref(*root_);
@@ -692,15 +699,54 @@ RESPONSE dstree::Index::search() {
     return FAILURE;
   }
 
+  VALUE_TYPE *query_sketch_buffer = nullptr;
+  if (config_.get().is_sketch_provided_) {
+    if (!fs::exists(config_.get().query_sketch_filepath_)) {
+      spdlog::error("query sketch filepath {:s} does not exist", config_.get().query_sketch_filepath_);
+
+      return FAILURE;
+    }
+
+    std::ifstream query_sketch_fin(config_.get().query_sketch_filepath_, std::ios::in | std::ios::binary);
+    if (!query_fin.good()) {
+      spdlog::error("query sketch filepath {:s} cannot open", config_.get().query_sketch_filepath_);
+
+      return FAILURE;
+    }
+
+    auto query_sketch_nbytes =
+        static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().sketch_length_ * config_.get().query_nseries_;
+    query_sketch_buffer = static_cast<VALUE_TYPE *>(std::malloc(query_sketch_nbytes));
+
+    query_sketch_fin.read(reinterpret_cast<char *>(query_sketch_buffer), query_sketch_nbytes);
+
+    if (query_sketch_fin.fail()) {
+      spdlog::error("cannot read {:d} bytes from {:s}", query_nbytes, config_.get().query_filepath_);
+
+      return FAILURE;
+    }
+  }
+
+  VALUE_TYPE *series_ptr, *sketch_ptr = nullptr;
   for (ID_TYPE query_id = 0; query_id < config_.get().query_nseries_; ++query_id) {
-    VALUE_TYPE *series_ptr = query_buffer + config_.get().series_length_ * query_id;
-    search(query_id, series_ptr);
+    series_ptr = query_buffer + config_.get().series_length_ * query_id;
+
+    if (config_.get().is_sketch_provided_) {
+      sketch_ptr = query_sketch_buffer + config_.get().sketch_length_ * query_id;
+    }
+
+    search(query_id, series_ptr, sketch_ptr);
   }
 
   return SUCCESS;
 }
 
-RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
+RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr) {
+  VALUE_TYPE *route_ptr = series_ptr;
+  if (config_.get().is_sketch_provided_) {
+    route_ptr = sketch_ptr;
+  }
+
   auto answer = std::make_shared<dstree::Answer>(config_.get().n_nearest_neighbor_, query_id);
 
   if (config_.get().require_neurofilter_) {
@@ -713,7 +759,7 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
   std::reference_wrapper<dstree::Node> resident_node = std::ref(*root_);
 
   while (!resident_node.get().is_leaf()) {
-    resident_node = resident_node.get().route(series_ptr);
+    resident_node = resident_node.get().route(route_ptr);
   }
 
   ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
@@ -722,24 +768,7 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
   resident_node.get().search(series_ptr, *answer, visited_node_counter, visited_series_counter);
 
   if (config_.get().is_exact_search_) {
-
-//#ifdef DEBUG
-//    //#ifndef DEBUGGED
-//    spdlog::debug("query {:d} heap_size {:d}",
-//                  answer->query_id_,
-//                  leaf_min_heap_.size());
-//    //#endif
-//#endif
-
-    leaf_min_heap_.push(std::make_tuple(std::ref(*root_), root_->cal_lower_bound_EDsquare(series_ptr)));
-
-//#ifdef DEBUG
-//    //#ifndef DEBUGGED
-//    spdlog::debug("query {:d} root_id {:d}",
-//                  answer->query_id_,
-//                  root_->get_id());
-//    //#endif
-//#endif
+    leaf_min_heap_.push(std::make_tuple(std::ref(*root_), root_->cal_lower_bound_EDsquare(route_ptr)));
 
     // WARN undefined behaviour
     std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
@@ -762,53 +791,10 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
 
       leaf_min_heap_.pop();
 
-//#ifdef DEBUG
-//      //#ifndef DEBUGGED
-//      spdlog::debug("query {:d} node_id {:d} is_leaf {:b}",
-//                    answer->query_id_,
-//                    node_to_visit.get().get_id(),
-//                    node_to_visit.get().is_leaf());
-//      //#endif
-//#endif
-
       if (node_to_visit.get().is_leaf()) {
-
-//#ifdef DEBUG
-//        //#ifndef DEBUGGED
-//        spdlog::debug("query {:d} node_id {:d} node_c {:d} < node_m {:d}, series_c {:d} < series_m {:d}",
-//                      answer->query_id_,
-//                      node_to_visit.get().get_id(),
-//                      visited_node_counter,
-//                      config_.get().search_max_nnode_,
-//                      visited_series_counter,
-//                      config_.get().search_max_nseries_);
-//        //#endif
-//#endif
-
-        if (visited_node_counter < config_.get().search_max_nnode_
-            && visited_series_counter < config_.get().search_max_nseries_) {
-
-//#ifdef DEBUG
-//          //#ifndef DEBUGGED
-//          spdlog::debug("query {:d} node_id {:d} resident_id {:d}",
-//                        answer->query_id_,
-//                        node_to_visit.get().get_id(),
-//                        resident_node.get().get_id());
-//          //#endif
-//#endif
-
+        if (visited_node_counter < config_.get().search_max_nnode_ &&
+            visited_series_counter < config_.get().search_max_nseries_) {
           if (node_to_visit.get().get_id() != resident_node.get().get_id()) {
-
-//#ifdef DEBUG
-//            //#ifndef DEBUGGED
-//            spdlog::debug("query {:d} node_id {:d} node2visit_lbdistance {:.3f} bsf {:.3f}",
-//                          answer->query_id_,
-//                          node_to_visit.get().get_id(),
-//                          node2visit_lbdistance,
-//                          answer->get_bsf());
-//            //#endif
-//#endif
-
             if (config_.get().examine_ground_truth_ || answer->is_bsf(node2visit_lbdistance)) {
               if (node_to_visit.get().has_filter()) {
                 VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
@@ -837,7 +823,7 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr) {
         }
       } else {
         for (auto child_node : node_to_visit.get()) {
-          VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(series_ptr);
+          VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(route_ptr);
 
           if (config_.get().examine_ground_truth_ || answer->is_bsf(child_lower_bound_EDsquare)) {
             leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));

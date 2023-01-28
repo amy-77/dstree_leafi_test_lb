@@ -44,18 +44,21 @@ class MLP : public FilterModel {
 //    torch::nn::init::kaiming_uniform_(fc2->weight, 0, torch::kFanIn, torch::kSigmoid);
 //    torch::nn::init::xavier_uniform_(fc3->weight, 1.0);
 
-    activate_ = register_module("lkrelu", torch::nn::LeakyReLU(torch::nn::LeakyReLUOptions().negative_slope(negative_slope).inplace(true)));
+    activate_ = register_module("lkrelu", torch::nn::LeakyReLU(
+        torch::nn::LeakyReLUOptions().negative_slope(negative_slope)));
 //     activate_ = register_module("sftp", torch::nn::Softplus(torch::nn::SoftplusOptions().beta(0.24).threshold(42.42)));
   }
 
   torch::Tensor forward(torch::Tensor &x) {
-    x = activate_->forward(fc1_->forward(x));
+    auto a1 = fc1_->forward(x);
+    auto z1 = activate_->forward(a1);
 //    x = torch::dropout(x, dropout_p_, is_training());
 
 //    x = activate_->forward(fc2->forward(x));
 //    x = torch::dropout(x, dropout_p_, is_training());
 
-    return at::squeeze(fc3_->forward(x));
+    auto a3 = fc3_->forward(z1);
+    return at::squeeze(a3);
   }
 
  private:
@@ -69,7 +72,6 @@ class MLP : public FilterModel {
 //  torch::nn::Sigmoid activate_;
 //  torch::nn::Tanh activate_;
 };
-
 
 }
 }

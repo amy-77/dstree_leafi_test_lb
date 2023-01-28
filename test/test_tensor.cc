@@ -37,10 +37,11 @@ int main(int argc, char *argv[]) {
   for (ID_TYPE i = 0; i < series_length * num_series; ++i) {
     queries.push_back(static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
   }
-  auto query_tsr = torch::from_blob(queries.data(),
+  auto query_tsr_cpu = torch::from_blob(queries.data(),
                                     {num_series, series_length},
-                                    torch::TensorOptions().dtype(TORCH_VALUE_TYPE).device(*device_).requires_grad(false));
-//  query_tsr = query_tsr.to(*device_);
+//                                    torch::TensorOptions().dtype(TORCH_VALUE_TYPE).device(*device_).requires_grad(false));
+                                    torch::TensorOptions().dtype(TORCH_VALUE_TYPE).requires_grad(false));
+  auto query_tsr = query_tsr_cpu.to(*device_);
 //  query_tsr.requires_grad_(false);
   std::cout << query_tsr.device() << std::endl;
 
@@ -53,8 +54,8 @@ int main(int argc, char *argv[]) {
     nn_distances_.push_back(static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
   }
   auto target_tsr_cpu = torch::from_blob(nn_distances_.data(),
-                                     {num_series},
-                                     torch::TensorOptions().dtype(TORCH_VALUE_TYPE).requires_grad(false));
+                                         {num_series},
+                                         torch::TensorOptions().dtype(TORCH_VALUE_TYPE).requires_grad(false));
   auto target_tsr = target_tsr_cpu.to(*device_);
 //  target_tsr = target_tsr.to(*device_);
 //  target_tsr.requires_grad_(false);
@@ -75,23 +76,45 @@ int main(int argc, char *argv[]) {
   for (ID_TYPE i = 0; i < num_epoch; ++i) {
     model_->train();
 
-//    auto query_tsr_detached = query_tsr.detach().clone();
-//    query_tsr_detached.requires_grad_(false);
+    auto query_tsr_detached = query_tsr.detach().clone();
+    query_tsr_detached.requires_grad_(false);
     optimizer.zero_grad();
 
-    torch::Tensor prediction = model_->forward(query_tsr);
-//    torch::Tensor prediction = model_->forward(query_tsr_detached);
+    auto last_query_cpu = query_tsr_detached.index({query_tsr.size(0) - 1}).cpu().contiguous();
+    std::cout << i << " " << -1 << " "
+              << query_tsr_detached.requires_grad() << " "
+              << target_tsr.requires_grad() << " "
+              << upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)) << std::endl;
+
+    std::cout << "!!! before model.f " << i << " " << query_tsr_detached.requires_grad() << " " << query_tsr_detached.is_leaf() << std::endl;
+
+//    torch::Tensor prediction = model_->forward(query_tsr);
+    torch::Tensor prediction = model_->forward(query_tsr_detached);
+
+    std::cout << "!!! model.f - loss.f " << i << " " << query_tsr_detached.requires_grad() << " " << query_tsr_detached.is_leaf() << std::endl;
 
     torch::Tensor loss = mse_loss->forward(prediction, target_tsr);
+
+    std::cout << "!!! loss.f - loss.b " << i << " " << query_tsr_detached.requires_grad() << " " << query_tsr_detached.is_leaf() << std::endl;
 
     loss.backward();
 //    query_tsr.grad().data().set_(tensor_zero_grad);
 
+    std::cout << "!!! loss.b opt.s " << i << " " << query_tsr_detached.requires_grad() << " " << query_tsr_detached.is_leaf() << std::endl;
+
     optimizer.step();
 
-    auto last_query_cpu = query_tsr.index({query_tsr.size(0) - 1}).cpu().contiguous();
+    std::cout << "!!! after opt.s " << i << " " << query_tsr_detached.requires_grad() << " " << query_tsr_detached.is_leaf() << std::endl;
+
+    last_query_cpu = query_tsr.index({query_tsr.size(0) - 1}).cpu().contiguous();
     std::cout << i << " " << loss.item<VALUE_TYPE>() << " "
               << query_tsr.requires_grad() << " "
+              << target_tsr.requires_grad() << " "
+              << upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)) << std::endl;
+
+    last_query_cpu = query_tsr_detached.index({query_tsr.size(0) - 1}).cpu().contiguous();
+    std::cout << i << " " << loss.item<VALUE_TYPE>() << " "
+              << query_tsr_detached.requires_grad() << " "
               << target_tsr.requires_grad() << " "
               << upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)) << std::endl;
   }
@@ -107,6 +130,7 @@ int main(int argc, char *argv[]) {
   queries_valid_tsr.requires_grad_(false);
 
   for (ID_TYPE i = 0; i < num_epoch; ++i) {
+    c10::InferenceMode guard;
     model_->eval();
 
     torch::Tensor prediction = model_->forward(queries_valid_tsr);
@@ -116,7 +140,8 @@ int main(int argc, char *argv[]) {
     std::cout << i << " " << -1 << " "
               << queries_valid_tsr.requires_grad() << " "
               << target_tsr.requires_grad() << " "
-              << upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)) << std::endl;
+              << upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)) << std::endl
+              << std::flush;
   }
 
   return 0;

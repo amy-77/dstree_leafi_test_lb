@@ -277,8 +277,9 @@ RESPONSE dstree::Filter::train() {
     VALUE_TYPE valid_loss = 0;
 
     { // evaluate
+//      torch::NoGradGuard no_grad;
+      c10::InferenceMode guard;
       model_->eval();
-      torch::NoGradGuard no_grad;
 
       torch::Tensor prediction = model_->forward(valid_data);
 
@@ -321,8 +322,10 @@ RESPONSE dstree::Filter::train() {
 #ifdef DEBUG
 //#ifndef DEBUGGED
     if ((epoch < 100 && epoch % 10 == 0) || (epoch >= 100 && epoch % 100 == 0)) {
+//      torch::NoGradGuard no_grad;
+      c10::InferenceMode guard;
       model_->eval();
-      torch::NoGradGuard no_grad;
+
       torch::Tensor pred_cpu;
 
 //      pred_cpu = model_->forward(all_data).detach().cpu().contiguous();
@@ -361,8 +364,9 @@ RESPONSE dstree::Filter::train() {
 #ifdef DEBUG
 //#ifndef DEBUGGED
   {
+//    torch::NoGradGuard no_grad;
+    c10::InferenceMode guard;
     model_->eval();
-    torch::NoGradGuard no_grad;
 
     auto prediction = model_->forward(all_data).detach().cpu();
 

@@ -44,6 +44,8 @@ class Buffer {
   bool is_full() const { return capacity_ > 0 && offsets_.size() == capacity_; }
   ID_TYPE size() const { return size_; }
 
+  RESPONSE dump() const;
+
  private:
   bool is_on_disk_;
   ID_TYPE capacity_, size_;

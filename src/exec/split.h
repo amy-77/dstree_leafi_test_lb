@@ -27,6 +27,9 @@ class Split {
   ~Split() = default;
 
   ID_TYPE route(VALUE_TYPE value) const;
+
+  RESPONSE dump(std::ofstream &node_fos, void *ofs_buf) const;
+
   Split &operator=(const Split &split);
 
   bool is_vertical_split_;

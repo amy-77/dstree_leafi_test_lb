@@ -31,6 +31,10 @@ const VALUE_TYPE EPSILON = 1e-5;
 const VALUE_TYPE MIN_VALUE = -1e5;
 const VALUE_TYPE MAX_VALUE = 1e5;
 
+const ID_TYPE MAX_ID = 9999999999;
+
+const VALUE_TYPE PI_APPROX_7 = 3.1415926;
+
 const ID_TYPE STR_DEFAULT_SIZE = 65536;
 
 const std::string LOGGER_NAME = "file_logger_mt";

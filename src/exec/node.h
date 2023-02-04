@@ -99,17 +99,18 @@ class Node {
 
   RESPONSE log();
 
+  RESPONSE dump(void *ofs_buf) const;
+
  private:
   ID_TYPE depth_, id_;
   ID_TYPE nseries_;
 
   std::reference_wrapper<Config> config_;
 
-  std::unique_ptr<EAPCAEnvelope> eapca_envelope_;
   std::reference_wrapper<Buffer> buffer_;
 
+  std::unique_ptr<EAPCAEnvelope> eapca_envelope_;
   std::unique_ptr<Split> split_;
-//  std::shared_ptr<Node> parent_;
 
   std::vector<std::unique_ptr<Node>> children_;
   std::vector<std::reference_wrapper<Node>> children_refs_; // for iterator only

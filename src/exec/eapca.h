@@ -58,6 +58,8 @@ class EAPCAEnvelope {
   VALUE_TYPE cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr) const;
   VALUE_TYPE cal_upper_bound_EDsquare(const VALUE_TYPE *series_ptr) const;
 
+  RESPONSE dump(std::ofstream &node_fos) const;
+
   EAPCAEnvelope &operator=(const EAPCAEnvelope &eapca_envelope) = default;
 
   ID_TYPE nsegment_, nsubsegment_;

@@ -142,6 +142,7 @@ RESPONSE dstree::Buffer::flush(VALUE_TYPE *load_buffer, VALUE_TYPE *flush_buffer
 
 RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
   offsets_.clear();
+  size_ = 0;
 
   if (if_remove_cache) {
     offsets_.shrink_to_fit();
@@ -149,6 +150,21 @@ RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
   }
 
   return SUCCESS;
+}
+
+RESPONSE dstree::Buffer::dump() const {
+  // TODO support load/dump in batches
+
+  std::ofstream buffer_fos(filepath_, std::ios::out | std::ios::binary);
+//  assert(buffer_fos.is_open());
+
+  buffer_fos.write(reinterpret_cast<const char *>(&size_), sizeof(ID_TYPE));
+  buffer_fos.write(reinterpret_cast<const char *>(offsets_.data()), sizeof(ID_TYPE) * offsets_.size());
+
+//  assert(buffer_fos.good());
+  buffer_fos.close();
+
+  return FAILURE;
 }
 
 dstree::BufferManager::BufferManager(dstree::Config &config) :
@@ -200,7 +216,7 @@ dstree::BufferManager::~BufferManager() {
 
 dstree::Buffer &dstree::BufferManager::create_node_buffer(ID_TYPE node_id) {
   auto buffer_id = static_cast<ID_TYPE>(node_buffers_.size());
-  std::string buffer_filepath = config_.get().index_persist_folderpath_ + std::to_string(node_id) +
+  std::string buffer_filepath = config_.get().persist_data_folderpath_ + std::to_string(node_id) +
       config_.get().index_persist_file_postfix_;
 
   node_buffers_.emplace_back(std::make_unique<dstree::Buffer>(

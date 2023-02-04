@@ -35,15 +35,20 @@ class Filter {
   };
 
   RESPONSE train();
-
   VALUE_TYPE infer(torch::Tensor &query_series) const;
+
+  RESPONSE dump(std::ofstream &node_fos) const;
+
+  ID_TYPE get_id() const { return id_; };
 
  private:
   ID_TYPE id_;
 
   std::reference_wrapper<dstree::Config> config_;
 
-  std::unique_ptr<FilterModel> model_;
+//  std::unique_ptr<FilterModel> model_;
+  std::shared_ptr<FilterModel> model_; // torch::save only takes shared_ptr
+
   std::unique_ptr<torch::Device> device_; // TODO ref?
 
   bool is_trained_;

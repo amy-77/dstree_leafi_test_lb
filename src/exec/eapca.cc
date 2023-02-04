@@ -435,3 +435,21 @@ VALUE_TYPE dstree::EAPCAEnvelope::cal_upper_bound_EDsquare(const VALUE_TYPE *ser
   // TODO
   return 0;
 }
+
+RESPONSE dstree::EAPCAEnvelope::dump(std::ofstream &node_fos) const {
+  node_fos.write(reinterpret_cast<const char *>(&nsegment_), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(segment_lengths_.data()), sizeof(ID_TYPE) * nsegment_);
+  node_fos.write(reinterpret_cast<const char *>(segment_min_means_.data()), sizeof(VALUE_TYPE) * nsegment_);
+  node_fos.write(reinterpret_cast<const char *>(segment_max_means_.data()), sizeof(VALUE_TYPE) * nsegment_);
+  node_fos.write(reinterpret_cast<const char *>(segment_min_stds_.data()), sizeof(VALUE_TYPE) * nsegment_);
+  node_fos.write(reinterpret_cast<const char *>(segment_max_stds_.data()), sizeof(VALUE_TYPE) * nsegment_);
+
+  node_fos.write(reinterpret_cast<const char *>(&nsubsegment_), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(subsegment_lengths_.data()), sizeof(ID_TYPE) * nsubsegment_);
+  node_fos.write(reinterpret_cast<const char *>(subsegment_min_means_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
+  node_fos.write(reinterpret_cast<const char *>(subsegment_max_means_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
+  node_fos.write(reinterpret_cast<const char *>(subsegment_min_stds_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
+  node_fos.write(reinterpret_cast<const char *>(subsegment_max_stds_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
+
+  return SUCCESS;
+}

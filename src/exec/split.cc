@@ -30,3 +30,22 @@ dstree::Split &dstree::Split::operator=(const dstree::Split &split) {
 
   return *this;
 }
+
+RESPONSE dstree::Split::dump(std::ofstream &node_fos, void *ofs_buf) const {
+  node_fos.write(reinterpret_cast<const char *>(&is_vertical_split_), sizeof(bool));
+
+  node_fos.write(reinterpret_cast<const char *>(&split_segment_id_), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(&split_subsegment_id_), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(&split_segment_offset_), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(&split_segment_length_), sizeof(ID_TYPE));
+
+  node_fos.write(reinterpret_cast<const char *>(&horizontal_split_mode_), sizeof(HORIZONTAL_SPLIT_MODE));
+
+  auto ofs_id_buf = reinterpret_cast<ID_TYPE *>(ofs_buf);
+  ofs_id_buf[0] = static_cast<ID_TYPE>(horizontal_breakpoints_.size());
+  node_fos.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(horizontal_breakpoints_.data()),
+                 sizeof(VALUE_TYPE) * horizontal_breakpoints_.size());
+
+  return SUCCESS;
+}

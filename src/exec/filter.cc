@@ -125,7 +125,6 @@ RESPONSE dstree::Filter::train() {
 
   spdlog::debug("stream {:d} filter {:d} d_bsf_sq = {:s}",
                 stream_id, id_, upcite::get_str(bsf_distances_.data(), train_size_));
-
 #endif
 
   if (config_.get().filter_remove_square_) {
@@ -158,7 +157,7 @@ RESPONSE dstree::Filter::train() {
       valid_dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
   auto all_data = shared_train_queries_.get().clone();
   auto all_dataset = SeriesDataset(all_data, nn_distances_, train_size_, *device_);
   auto all_data_loader = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
@@ -185,6 +184,7 @@ RESPONSE dstree::Filter::train() {
                stream_id, id_, last_query_cpu.requires_grad(),
                upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)));
 #endif
+#endif
 
   torch::optim::SGD optimizer(model_->parameters(), config_.get().filter_train_learning_rate_);
   upcite::optim::ReduceLROnPlateau lr_scheduler = upcite::optim::ReduceLROnPlateau(optimizer);
@@ -205,9 +205,9 @@ RESPONSE dstree::Filter::train() {
   torch::Tensor batch_data, batch_target;
   for (ID_TYPE epoch = 0; epoch < config_.get().filter_train_nepoch_; ++epoch) {
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
     bool is_train_logged = false;
-//#endif
+#endif
 #endif
 
     model_->train();
@@ -234,6 +234,7 @@ RESPONSE dstree::Filter::train() {
 #ifdef DEBUG
       batch_train_losses.push_back(loss.detach().item<float>());
 
+#ifndef DEBUGGED
       if (!is_train_logged && ((epoch < 100 && epoch % 10 == 0) || (epoch >= 100 && epoch % 100 == 0))) {
         auto target_cpu = batch_target.detach().cpu().contiguous();
         spdlog::info("stream {:d} filter {:d} t{:d} b0 d_nn{:s} = {:s}",
@@ -264,6 +265,7 @@ RESPONSE dstree::Filter::train() {
         is_train_logged = true;
       }
 #endif
+#endif
     }
 
 #ifdef DEBUG
@@ -289,7 +291,7 @@ RESPONSE dstree::Filter::train() {
 #ifdef DEBUG
       valid_losses.push_back(valid_loss);
 
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
       if ((epoch < 100 && epoch % 10 == 0) || (epoch >= 100 && epoch % 100 == 0)) {
 #ifndef DEBUGGED
         spdlog::info("stream {:d} filter {:d} v{:d} = {:b}, {:b}, {:b}",
@@ -307,7 +309,7 @@ RESPONSE dstree::Filter::train() {
                      stream_id, id_, epoch, valid_data.requires_grad(),
                      upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)));
       }
-//#endif
+#endif
 #endif
     }
 
@@ -320,7 +322,7 @@ RESPONSE dstree::Filter::train() {
 //                         config_.get().filter_train_nepoch_);
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
     if ((epoch < 100 && epoch % 10 == 0) || (epoch >= 100 && epoch % 100 == 0)) {
 //      torch::NoGradGuard no_grad;
       c10::InferenceMode guard;
@@ -350,7 +352,7 @@ RESPONSE dstree::Filter::train() {
                    model_->fc1_->is_training(), model_->fc3_->is_training(), model_->activate_->is_training());
 #endif
     };
-//#endif
+#endif
 #endif
   }
 
@@ -368,7 +370,8 @@ RESPONSE dstree::Filter::train() {
     c10::InferenceMode guard;
     model_->eval();
 
-    auto prediction = model_->forward(all_data).detach().cpu();
+//    auto prediction = model_->forward(all_data).detach().cpu();
+    auto prediction = model_->forward(shared_train_queries_).detach().cpu();
 
     spdlog::info("stream {:d} filter {:d} d_pred{:s} = {:s}",
                  stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
@@ -425,4 +428,18 @@ VALUE_TYPE dstree::Filter::infer(torch::Tensor &query_series) const {
   } else {
     return constant::MAX_VALUE;
   }
+}
+
+RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
+  node_fos.write(reinterpret_cast<const char *>(&train_size_), sizeof(ID_TYPE));
+
+  node_fos.write(reinterpret_cast<const char *>(bsf_distances_.data()), sizeof(VALUE_TYPE) * bsf_distances_.size());
+  node_fos.write(reinterpret_cast<const char *>(nn_distances_.data()), sizeof(VALUE_TYPE) * nn_distances_.size());
+
+  std::string model_filepath = config_.get().persist_filters_folderpath_ + std::to_string(id_) +
+      config_.get().model_persist_file_postfix_;
+
+  torch::save(model_, model_filepath);
+
+  return SUCCESS;
 }

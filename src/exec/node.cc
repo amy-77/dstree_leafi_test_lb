@@ -5,6 +5,8 @@
 
 #include "node.h"
 
+#include <iostream>
+#include <fstream>
 #include <utility>
 
 #include <spdlog/spdlog.h>
@@ -666,6 +668,68 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 
 RESPONSE dstree::Node::log() {
   spdlog::info("node {:d}: depth = {:d}, size = {:d}", id_, depth_, nseries_);
+
+  return SUCCESS;
+}
+
+RESPONSE dstree::Node::dump(void *ofs_buf) const {
+  std::string node_info_filepath = config_.get().persist_node_info_folderpath_ + std::to_string(id_) +
+      config_.get().index_persist_file_postfix_;
+
+  std::ofstream node_fos(node_info_filepath, std::ios::out | std::ios::binary);
+//  assert(node_fos.is_open());
+
+  auto ofs_id_buf = reinterpret_cast<ID_TYPE *>(ofs_buf);
+
+  node_fos.write(reinterpret_cast<const char *>(&id_), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(&depth_), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(&nseries_), sizeof(ID_TYPE));
+
+  eapca_envelope_->dump(node_fos);
+
+  ofs_id_buf[0] = static_cast<ID_TYPE>(children_.size());
+  node_fos.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
+
+  if (!children_.empty()) {
+    for (ID_TYPE i = 0; i < children_.size(); ++i) {
+      ofs_id_buf[i] = children_[i]->id_;
+    }
+
+    node_fos.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE) * children_.size());
+
+    split_->dump(node_fos, ofs_buf);
+  }
+
+  if (neurofilter_ != nullptr) {
+    ofs_id_buf[0] = neurofilter_.get()->get_id();
+  } else {
+    ofs_id_buf[0] = -1;
+  }
+  node_fos.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
+
+  if (neurofilter_ != nullptr) {
+    neurofilter_->dump(node_fos);
+  }
+
+  if (buffer_.get().size() > 0) {
+    ofs_id_buf[0] = 1;
+  } else {
+    ofs_id_buf[0] = -1;
+  }
+  node_fos.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
+
+  if (buffer_.get().size() > 0) {
+    buffer_.get().dump();
+  }
+
+//  assert(node_fos.good());
+  node_fos.close();
+
+  if (!children_.empty()) {
+    for (ID_TYPE i = 0; i < children_.size(); ++i) {
+      children_[i]->dump(ofs_buf);
+    }
+  }
 
   return SUCCESS;
 }

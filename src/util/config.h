@@ -83,6 +83,17 @@ class Config {
 
   bool filter_remove_square_;
   VALUE_TYPE filter_train_val_split_;
+
+  std::string filter_query_id_filename_;
+  std::string filter_query_filename_;
+
+  VALUE_TYPE filter_query_noise_level_;
+
+  bool to_persist_index_;
+  std::string model_persist_file_postfix_;
+  std::string persist_node_info_folderpath_;
+  std::string persist_filters_folderpath_;
+  std::string persist_data_folderpath_;
 };
 
 }

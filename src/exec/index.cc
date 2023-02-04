@@ -6,6 +6,8 @@
 #include "index.h"
 
 #include <memory>
+#include <random>
+#include <algorithm>
 #include <immintrin.h>
 
 #include <spdlog/spdlog.h>
@@ -598,17 +600,80 @@ RESPONSE dstree::Index::filter_train_mthread() {
 }
 
 RESPONSE dstree::Index::train() {
+  auto query_nbytes = static_cast<ID_TYPE>(
+      sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().filter_train_nexample_;
+  filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_nbytes));
+
   if (!fs::exists(config_.get().filter_query_filepath_)) {
-    spdlog::error("filter train query filepath {:s} does not exist", config_.get().filter_query_filepath_);
+    if (config_.get().filter_query_filepath_ != "") {
+      spdlog::error("filter train query filepath {:s} does not exist", config_.get().filter_query_filepath_);
+    }
+
+    auto sampled_ids = static_cast<ID_TYPE *>(malloc(sizeof(ID_TYPE) * config_.get().db_nseries_));
+    for (ID_TYPE i = 0; i < config_.get().db_nseries_; ++i) {
+      sampled_ids[i] = i;
+    }
+
+    std::random_device rd;
+    std::mt19937 rng{rd()};
+    std::uniform_int_distribution<ID_TYPE> rand_uniform(0, constant::MAX_ID);
+    std::shuffle(sampled_ids, sampled_ids + config_.get().db_nseries_, rng);
+
+    std::string filter_query_id_filepath =
+        config_.get().index_persist_folderpath_ + config_.get().filter_query_id_filename_;
+    std::ofstream id_fout(filter_query_id_filepath, std::ios::binary | std::ios_base::app);
+    id_fout.write(reinterpret_cast<char *>(sampled_ids), sizeof(ID_TYPE) * config_.get().filter_train_nexample_);
+    id_fout.close();
+
+    std::ifstream db_fin(config_.get().db_filepath_, std::ios::in | std::ios::binary);
+    ID_TYPE series_nbytes = sizeof(VALUE_TYPE) * config_.get().series_length_;
+
+    for (ID_TYPE i = 0; i < config_.get().filter_train_nexample_; ++i) {
+      VALUE_TYPE *series_ptr = filter_train_query_ptr_ + config_.get().series_length_ * i;
+
+      ID_TYPE series_bytes_offset = series_nbytes * sampled_ids[i];
+      db_fin.seekg(series_bytes_offset);
+      db_fin.read(reinterpret_cast<char *>(series_ptr), series_nbytes);
+
+      VALUE_TYPE mean = 0, std_dev = 0;
+      for (ID_TYPE j = 0; j < config_.get().series_length_; ++j) {
+        VALUE_TYPE f1 = static_cast<VALUE_TYPE>(rand_uniform(rng) % 999 + 1) / 1000.0f;
+        VALUE_TYPE c = static_cast<VALUE_TYPE>(sqrt(-2.0 * log(f1)));
+
+        VALUE_TYPE f2 = static_cast<VALUE_TYPE>(rand_uniform(rng) % 1000) / 1000.0f;
+        VALUE_TYPE b = 2 * constant::PI_APPROX_7 * f2;
+
+        VALUE_TYPE noise = c * cos(b) * sqrt(config_.get().filter_query_noise_level_);
+
+        series_ptr[j] += noise;
+        mean += series_ptr[j];
+      }
+
+      mean /= config_.get().series_length_;
+
+      for (ID_TYPE j = 0; j < config_.get().series_length_; ++j) {
+        std_dev += (series_ptr[j] - mean) * (series_ptr[j] - mean);
+      }
+
+      std_dev = sqrt(std_dev / config_.get().series_length_);
+
+      for (ID_TYPE j = 0; j < config_.get().series_length_; ++j) {
+        series_ptr[j] = (series_ptr[j] - mean) / std_dev;
+      }
+    }
+
+    std::string filter_query_filepath = config_.get().index_persist_folderpath_ + config_.get().filter_query_filename_;
+    std::ofstream query_fout(filter_query_filepath, std::ios::binary | std::ios_base::app);
+    query_fout.write(reinterpret_cast<char *>(filter_train_query_ptr_),
+                     series_nbytes * config_.get().filter_train_nexample_);
+    query_fout.close();
+
+    spdlog::info("generated {:d} filter train queries", config_.get().filter_train_nexample_);
   } else {
     std::ifstream query_fin(config_.get().filter_query_filepath_, std::ios::in | std::ios::binary);
     if (!query_fin.good()) {
       spdlog::error("filter train query filepath {:s} cannot open", config_.get().filter_query_filepath_);
     }
-
-    auto query_nbytes = static_cast<ID_TYPE>(
-        sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().filter_train_nexample_;
-    filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_nbytes));
 
     query_fin.read(reinterpret_cast<char *>(filter_train_query_ptr_), query_nbytes);
 
@@ -618,12 +683,6 @@ RESPONSE dstree::Index::train() {
       std::free(filter_train_query_ptr_);
       filter_train_query_ptr_ = nullptr;
     }
-  }
-
-  if (filter_train_query_ptr_ == nullptr) {
-    spdlog::info("generate synthetic filter train queries");
-
-    // TODO
   }
 
   if (config_.get().filter_train_is_gpu_) {
@@ -668,9 +727,14 @@ RESPONSE dstree::Index::load() {
   return FAILURE;
 }
 
-RESPONSE dstree::Index::dump() {
-  // TODO
-  return FAILURE;
+RESPONSE dstree::Index::dump() const {
+  ID_TYPE ofs_buf_size = sizeof(ID_TYPE) * config_.get().series_length_ * 2; // 2x expanded for safety
+  void *ofs_buf = std::malloc(ofs_buf_size);
+
+  root_->dump(ofs_buf);
+
+  std::free(ofs_buf);
+  return SUCCESS;
 }
 
 RESPONSE dstree::Index::search() {
@@ -801,7 +865,7 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
-                spdlog::debug("query {:d} node_id {:d} predicted_nn_distance {:.3f} bsf {:.3f}",
+                spdlog::debug("query {:d} node_id {:d} d_pred_sq {:.3f} bsf {:.3f}",
                               answer->query_id_,
                               node_to_visit.get().get_id(),
                               predicted_nn_distance,

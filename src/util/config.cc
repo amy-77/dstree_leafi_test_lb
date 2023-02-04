@@ -7,14 +7,10 @@
 
 #include <iostream>
 
-//#include <boost/format.hpp>
+#include <spdlog/spdlog.h>
 #include <boost/filesystem.hpp>
-//#include <boost/log/trivial.hpp>
 #include <boost/program_options.hpp>
 #include <boost/algorithm/string/predicate.hpp>
-#include <spdlog/spdlog.h>
-
-//#include "logger.h"
 
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
@@ -56,6 +52,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_train_clip_grad_(false),
     filter_train_clip_grad_norm_type_(2),
     filter_train_clip_grad_max_norm_(1),
+    filter_query_filepath_(""),
     filter_train_is_mthread_(false),
     filter_collect_nthread_(-1),
     filter_train_nthread_(4),
@@ -64,7 +61,15 @@ dstree::Config::Config(int argc, char *argv[]) :
     is_sketch_provided_(false),
     sketch_length_(-1),
     train_sketch_filepath_(""),
-    query_sketch_filepath_("") {
+    query_sketch_filepath_(""),
+    filter_query_id_filename_("sampled_indices.bin"),
+    filter_query_filename_("generated_queries.bin"),
+    filter_query_noise_level_(0.1),
+    to_persist_index_(false),
+    model_persist_file_postfix_(".pickle"),
+    persist_node_info_folderpath_(""),
+    persist_filters_folderpath_(""),
+    persist_data_folderpath_("") {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -158,7 +163,11 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("filter_remove_square", po::bool_switch(&filter_remove_square_)->default_value(false),
        "Whether to use real distance (instead of square distances) to train filters")
       ("filter_train_val_split", po::value<VALUE_TYPE>(&filter_train_val_split_)->default_value(0.9),
-       "Neurofilter train train/val split ratio");
+       "Neurofilter train train/val split ratio")
+      ("filter_query_noise_level", po::value<VALUE_TYPE>(&filter_query_noise_level_)->default_value(0.1),
+       "Neurofilter train query noise level")
+      ("persist_index", po::bool_switch(&to_persist_index_)->default_value(false),
+       "Whether to persist the index structure (defaults: true for on-disk while false for in-memory)");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -172,16 +181,33 @@ dstree::Config::Config(int argc, char *argv[]) :
   if (vm.count("index_persist_folderpath")) {
     index_persist_folderpath_ = fs::system_complete(index_persist_folderpath_).string();
   } else {
-    index_persist_folderpath_ = fs::system_complete(fs::current_path()).string();
+    index_persist_folderpath_ = fs::absolute(fs::path(log_filepath_).parent_path()).string();
   }
 
-  if (on_disk_) {
-    if (!fs::is_directory(index_persist_folderpath_)) {
-      fs::create_directory(index_persist_folderpath_);
+  if (!fs::is_directory(index_persist_folderpath_)) {
+    fs::create_directory(index_persist_folderpath_);
+  }
+
+  if (!boost::algorithm::ends_with(index_persist_folderpath_, "/")) {
+    index_persist_folderpath_ += "/";
+  }
+
+  if (on_disk_ || to_persist_index_) {
+    persist_node_info_folderpath_ = index_persist_folderpath_ + "node/";
+    if (!fs::is_directory(persist_node_info_folderpath_)) {
+      fs::create_directory(persist_node_info_folderpath_);
     }
 
-    if (!boost::algorithm::ends_with(index_persist_folderpath_, "/")) {
-      index_persist_folderpath_ += "/";
+    persist_data_folderpath_ = index_persist_folderpath_ + "data/";
+    if (!fs::is_directory(persist_data_folderpath_)) {
+      fs::create_directory(persist_data_folderpath_);
+    }
+
+    if (require_neurofilter_) {
+      persist_filters_folderpath_ = index_persist_folderpath_ + "filter/";
+      if (!fs::is_directory(persist_filters_folderpath_)) {
+        fs::create_directory(persist_filters_folderpath_);
+      }
     }
   }
 
@@ -315,4 +341,15 @@ void dstree::Config::log() {
   spdlog::info("filter_remove_square = {:b}", filter_remove_square_);
 
   spdlog::info("filter_train_val_split = {:.3f}", filter_train_val_split_);
+
+  spdlog::info("filter_query_id_filename = {:s}", filter_query_id_filename_);
+  spdlog::info("filter_query_filename = {:s}", filter_query_filename_);
+
+  spdlog::info("filter_query_noise_level = {:.3f}", filter_query_noise_level_);
+
+  spdlog::info("to_persist_index = {:b}", to_persist_index_);
+  spdlog::info("model_persist_file_postfix = {:s}", model_persist_file_postfix_);
+  spdlog::info("persist_node_info_folderpath = {:s}", persist_node_info_folderpath_);
+  spdlog::info("persist_filters_folderpath = {:s}", persist_filters_folderpath_);
+  spdlog::info("persist_data_folderpath = {:s}", persist_data_folderpath_);
 }

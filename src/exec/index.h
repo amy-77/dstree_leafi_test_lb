@@ -39,7 +39,7 @@ class Index {
   RESPONSE train();
 
   RESPONSE load();
-  RESPONSE dump();
+  RESPONSE dump() const;
 
   RESPONSE search();
   RESPONSE search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr = nullptr);

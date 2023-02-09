@@ -153,18 +153,40 @@ RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
 }
 
 RESPONSE dstree::Buffer::dump() const {
-  // TODO support load/dump in batches
+  // TODO support dump in batches
 
-  std::ofstream buffer_fos(filepath_, std::ios::out | std::ios::binary);
+  std::ofstream buffer_ofs(filepath_, std::ios::out | std::ios::binary);
 //  assert(buffer_fos.is_open());
 
-  buffer_fos.write(reinterpret_cast<const char *>(&size_), sizeof(ID_TYPE));
-  buffer_fos.write(reinterpret_cast<const char *>(offsets_.data()), sizeof(ID_TYPE) * offsets_.size());
+  buffer_ofs.write(reinterpret_cast<const char *>(&size_), sizeof(ID_TYPE));
+  buffer_ofs.write(reinterpret_cast<const char *>(offsets_.data()), sizeof(ID_TYPE) * offsets_.size());
 
 //  assert(buffer_fos.good());
-  buffer_fos.close();
+  buffer_ofs.close();
 
-  return FAILURE;
+  return SUCCESS;
+}
+
+RESPONSE dstree::Buffer::load(void *ifs_buf) {
+  // TODO support load in batches
+
+  std::ifstream buffer_ifs(filepath_, std::ios::in | std::ios::binary);
+//  assert(buffer_ifs.is_open());
+
+  auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
+
+  ID_TYPE read_nbytes = sizeof(ID_TYPE);
+  buffer_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_ = ifs_id_buf[0];
+
+  read_nbytes = sizeof(ID_TYPE) * size_;
+  buffer_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  offsets_.insert(offsets_.begin(), ifs_id_buf, ifs_id_buf + size_);
+
+//  assert(buffer_ifs.good());
+  buffer_ifs.close();
+
+  return SUCCESS;
 }
 
 dstree::BufferManager::BufferManager(dstree::Config &config) :
@@ -216,8 +238,8 @@ dstree::BufferManager::~BufferManager() {
 
 dstree::Buffer &dstree::BufferManager::create_node_buffer(ID_TYPE node_id) {
   auto buffer_id = static_cast<ID_TYPE>(node_buffers_.size());
-  std::string buffer_filepath = config_.get().persist_data_folderpath_ + std::to_string(node_id) +
-      config_.get().index_persist_file_postfix_;
+  std::string buffer_filepath = config_.get().dump_data_folderpath_ + std::to_string(node_id) +
+      config_.get().index_dump_file_postfix_;
 
   node_buffers_.emplace_back(std::make_unique<dstree::Buffer>(
       config_.get().on_disk_,

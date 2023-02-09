@@ -20,9 +20,9 @@ namespace dstree {
 
 class Filter {
  public:
-  explicit Filter(dstree::Config &config,
-                  ID_TYPE id,
-                  std::reference_wrapper<torch::Tensor> shared_train_queries);
+  Filter(dstree::Config &config,
+         ID_TYPE id,
+         std::reference_wrapper<torch::Tensor> shared_train_queries);
   ~Filter() = default;
 
   RESPONSE push_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance) {
@@ -38,6 +38,7 @@ class Filter {
   VALUE_TYPE infer(torch::Tensor &query_series) const;
 
   RESPONSE dump(std::ofstream &node_fos) const;
+  RESPONSE load(std::ifstream &node_ifs, void *ifs_buf);
 
   ID_TYPE get_id() const { return id_; };
 

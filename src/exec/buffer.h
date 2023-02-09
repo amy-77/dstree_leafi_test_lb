@@ -45,6 +45,7 @@ class Buffer {
   ID_TYPE size() const { return size_; }
 
   RESPONSE dump() const;
+  RESPONSE load(void *ifs_buf);
 
  private:
   bool is_on_disk_;
@@ -56,7 +57,7 @@ class Buffer {
 
   ID_TYPE next_series_id_;
 
-  std::string filepath_;
+  std::string filepath_; // with node.id_
 };
 
 class BufferManager {

@@ -620,7 +620,7 @@ RESPONSE dstree::Index::train() {
     std::shuffle(sampled_ids, sampled_ids + config_.get().db_nseries_, rng);
 
     std::string filter_query_id_filepath =
-        config_.get().index_persist_folderpath_ + config_.get().filter_query_id_filename_;
+        config_.get().index_dump_folderpath_ + config_.get().filter_query_id_filename_;
     std::ofstream id_fout(filter_query_id_filepath, std::ios::binary | std::ios_base::app);
     id_fout.write(reinterpret_cast<char *>(sampled_ids), sizeof(ID_TYPE) * config_.get().filter_train_nexample_);
     id_fout.close();
@@ -662,7 +662,7 @@ RESPONSE dstree::Index::train() {
       }
     }
 
-    std::string filter_query_filepath = config_.get().index_persist_folderpath_ + config_.get().filter_query_filename_;
+    std::string filter_query_filepath = config_.get().index_dump_folderpath_ + config_.get().filter_query_filename_;
     std::ofstream query_fout(filter_query_filepath, std::ios::binary | std::ios_base::app);
     query_fout.write(reinterpret_cast<char *>(filter_train_query_ptr_),
                      series_nbytes * config_.get().filter_train_nexample_);
@@ -719,12 +719,23 @@ RESPONSE dstree::Index::train() {
 }
 
 RESPONSE dstree::Index::load() {
-  // TODO
+  ID_TYPE ifs_buf_size = sizeof(ID_TYPE) * config_.get().series_length_ * 2; // 2x expanded for safety
+  void *ifs_buf = std::malloc(ifs_buf_size);
+
+  RESPONSE status = root_->load(ifs_buf);
+
+  if (status == FAILURE) {
+    spdlog::info("failed to load index");
+    std::free(ifs_buf);
+    return FAILURE;
+  }
+
+  std::free(ifs_buf);
 
   leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare>(
       Compare(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));
 
-  return FAILURE;
+  return SUCCESS;
 }
 
 RESPONSE dstree::Index::dump() const {

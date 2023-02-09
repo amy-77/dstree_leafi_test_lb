@@ -51,6 +51,8 @@ class EAPCAEnvelope {
   EAPCAEnvelope(const Config &config,
                 const EAPCAEnvelope &parent_eapca_envelope,
                 const Split &parent_split);
+
+//  EAPCAEnvelope() = default; // only used for loading
   ~EAPCAEnvelope() = default;
 
   RESPONSE update(const dstree::EAPCA &series_eapca);
@@ -58,7 +60,8 @@ class EAPCAEnvelope {
   VALUE_TYPE cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr) const;
   VALUE_TYPE cal_upper_bound_EDsquare(const VALUE_TYPE *series_ptr) const;
 
-  RESPONSE dump(std::ofstream &node_fos) const;
+  RESPONSE dump(std::ofstream &node_ofs) const;
+  RESPONSE load(std::ifstream &node_ifs, void *ifs_buf);
 
   EAPCAEnvelope &operator=(const EAPCAEnvelope &eapca_envelope) = default;
 

@@ -436,20 +436,65 @@ VALUE_TYPE dstree::EAPCAEnvelope::cal_upper_bound_EDsquare(const VALUE_TYPE *ser
   return 0;
 }
 
-RESPONSE dstree::EAPCAEnvelope::dump(std::ofstream &node_fos) const {
-  node_fos.write(reinterpret_cast<const char *>(&nsegment_), sizeof(ID_TYPE));
-  node_fos.write(reinterpret_cast<const char *>(segment_lengths_.data()), sizeof(ID_TYPE) * nsegment_);
-  node_fos.write(reinterpret_cast<const char *>(segment_min_means_.data()), sizeof(VALUE_TYPE) * nsegment_);
-  node_fos.write(reinterpret_cast<const char *>(segment_max_means_.data()), sizeof(VALUE_TYPE) * nsegment_);
-  node_fos.write(reinterpret_cast<const char *>(segment_min_stds_.data()), sizeof(VALUE_TYPE) * nsegment_);
-  node_fos.write(reinterpret_cast<const char *>(segment_max_stds_.data()), sizeof(VALUE_TYPE) * nsegment_);
+RESPONSE dstree::EAPCAEnvelope::load(std::ifstream &node_ifs, void *ifs_buf) {
+  auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
+  auto ifs_value_buf = reinterpret_cast<VALUE_TYPE *>(ifs_buf);
 
-  node_fos.write(reinterpret_cast<const char *>(&nsubsegment_), sizeof(ID_TYPE));
-  node_fos.write(reinterpret_cast<const char *>(subsegment_lengths_.data()), sizeof(ID_TYPE) * nsubsegment_);
-  node_fos.write(reinterpret_cast<const char *>(subsegment_min_means_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
-  node_fos.write(reinterpret_cast<const char *>(subsegment_max_means_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
-  node_fos.write(reinterpret_cast<const char *>(subsegment_min_stds_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
-  node_fos.write(reinterpret_cast<const char *>(subsegment_max_stds_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
+  // nsegment_
+  ID_TYPE read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  nsegment_ = ifs_id_buf[0];
+
+  read_nbytes = sizeof(ID_TYPE) * nsegment_;
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  segment_lengths_.insert(segment_lengths_.begin(), ifs_id_buf, ifs_id_buf + nsegment_);
+
+  read_nbytes = sizeof(VALUE_TYPE) * nsegment_;
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  segment_min_means_.insert(segment_min_means_.begin(), ifs_value_buf, ifs_value_buf + nsegment_);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  segment_max_means_.insert(segment_max_means_.begin(), ifs_value_buf, ifs_value_buf + nsegment_);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  segment_min_stds_.insert(segment_min_stds_.begin(), ifs_value_buf, ifs_value_buf + nsegment_);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  segment_max_stds_.insert(segment_max_stds_.begin(), ifs_value_buf, ifs_value_buf + nsegment_);
+
+  // nsubsegment_
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  nsubsegment_ = ifs_id_buf[0];
+
+  read_nbytes = sizeof(ID_TYPE) * nsubsegment_;
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  subsegment_lengths_.insert(subsegment_lengths_.begin(), ifs_id_buf, ifs_id_buf + nsubsegment_);
+
+  read_nbytes = sizeof(VALUE_TYPE) * nsubsegment_;
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  subsegment_min_means_.insert(subsegment_min_means_.begin(), ifs_value_buf, ifs_value_buf + nsubsegment_);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  subsegment_max_means_.insert(subsegment_max_means_.begin(), ifs_value_buf, ifs_value_buf + nsubsegment_);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  subsegment_min_stds_.insert(subsegment_min_stds_.begin(), ifs_value_buf, ifs_value_buf + nsubsegment_);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  subsegment_max_stds_.insert(subsegment_max_stds_.begin(), ifs_value_buf, ifs_value_buf + nsubsegment_);
+
+  return SUCCESS;
+}
+
+RESPONSE dstree::EAPCAEnvelope::dump(std::ofstream &node_ofs) const {
+  node_ofs.write(reinterpret_cast<const char *>(&nsegment_), sizeof(ID_TYPE));
+  node_ofs.write(reinterpret_cast<const char *>(segment_lengths_.data()), sizeof(ID_TYPE) * nsegment_);
+  node_ofs.write(reinterpret_cast<const char *>(segment_min_means_.data()), sizeof(VALUE_TYPE) * nsegment_);
+  node_ofs.write(reinterpret_cast<const char *>(segment_max_means_.data()), sizeof(VALUE_TYPE) * nsegment_);
+  node_ofs.write(reinterpret_cast<const char *>(segment_min_stds_.data()), sizeof(VALUE_TYPE) * nsegment_);
+  node_ofs.write(reinterpret_cast<const char *>(segment_max_stds_.data()), sizeof(VALUE_TYPE) * nsegment_);
+
+  node_ofs.write(reinterpret_cast<const char *>(&nsubsegment_), sizeof(ID_TYPE));
+  node_ofs.write(reinterpret_cast<const char *>(subsegment_lengths_.data()), sizeof(ID_TYPE) * nsubsegment_);
+  node_ofs.write(reinterpret_cast<const char *>(subsegment_min_means_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
+  node_ofs.write(reinterpret_cast<const char *>(subsegment_max_means_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
+  node_ofs.write(reinterpret_cast<const char *>(subsegment_min_stds_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
+  node_ofs.write(reinterpret_cast<const char *>(subsegment_max_stds_.data()), sizeof(VALUE_TYPE) * nsubsegment_);
 
   return SUCCESS;
 }

@@ -27,8 +27,8 @@ dstree::Config::Config(int argc, char *argv[]) :
     batch_load_nseries_(-1),
     default_nbuffer_(1024 * 64),
     on_disk_(false),
-    index_persist_folderpath_("."),
-    index_persist_file_postfix_(".bin"),
+    index_dump_folderpath_("."),
+    index_dump_file_postfix_(".bin"),
     node_nchild_(2),
     vertical_split_nsubsegment_(2),
     vertical_split_gain_tradeoff_factor_(2),
@@ -65,11 +65,16 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_query_id_filename_("sampled_indices.bin"),
     filter_query_filename_("generated_queries.bin"),
     filter_query_noise_level_(0.1),
-    to_persist_index_(false),
-    model_persist_file_postfix_(".pickle"),
-    persist_node_info_folderpath_(""),
-    persist_filters_folderpath_(""),
-    persist_data_folderpath_("") {
+    to_dump_index_(false),
+    model_dump_file_postfix_(".pickle"),
+    dump_node_info_folderpath_(""),
+    dump_filters_folderpath_(""),
+    dump_data_folderpath_(""),
+    to_load_index_(false),
+    index_load_folderpath_(""),
+    load_node_info_folderpath_(""),
+    load_filters_folderpath_(""),
+    load_data_folderpath_("") {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -104,8 +109,8 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Default number of node buffers (will increase when needed)")
       ("on_disk", po::bool_switch(&on_disk_)->default_value(false),
        "Whether to build an on-disk index (otherwise an in-memory index)")
-      ("index_persist_folderpath", po::value<std::string>(&index_persist_folderpath_),
-       "Index on-disk root folderpath")
+      ("index_dump_folderpath", po::value<std::string>(&index_dump_folderpath_),
+       "Index dump (or on-disk) root folderpath")
       ("node_nchildren", po::value<ID_TYPE>(&node_nchild_)->default_value(2),
        "Number of child nodes (i.e., fanout) for each parent node")
       ("vsplit_nsubsegment", po::value<ID_TYPE>(&vertical_split_nsubsegment_)->default_value(2),
@@ -166,8 +171,12 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Neurofilter train train/val split ratio")
       ("filter_query_noise_level", po::value<VALUE_TYPE>(&filter_query_noise_level_)->default_value(0.1),
        "Neurofilter train query noise level")
-      ("persist_index", po::bool_switch(&to_persist_index_)->default_value(false),
-       "Whether to persist the index structure (defaults: true for on-disk while false for in-memory)");
+      ("dump_index", po::bool_switch(&to_dump_index_)->default_value(false),
+       "Whether to dump the index structure (defaults: true for on-disk while false for in-memory)")
+      ("load_index", po::bool_switch(&to_load_index_)->default_value(false),
+       "Whether to load the index structure")
+      ("index_load_folderpath", po::value<std::string>(&index_load_folderpath_),
+       "Index load root folderpath");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -176,39 +185,6 @@ dstree::Config::Config(int argc, char *argv[]) :
   if (vm.count("help")) {
     std::cout << po_desc << std::endl;
     exit(0);
-  }
-
-  if (vm.count("index_persist_folderpath")) {
-    index_persist_folderpath_ = fs::system_complete(index_persist_folderpath_).string();
-  } else {
-    index_persist_folderpath_ = fs::absolute(fs::path(log_filepath_).parent_path()).string();
-  }
-
-  if (!fs::is_directory(index_persist_folderpath_)) {
-    fs::create_directory(index_persist_folderpath_);
-  }
-
-  if (!boost::algorithm::ends_with(index_persist_folderpath_, "/")) {
-    index_persist_folderpath_ += "/";
-  }
-
-  if (on_disk_ || to_persist_index_) {
-    persist_node_info_folderpath_ = index_persist_folderpath_ + "node/";
-    if (!fs::is_directory(persist_node_info_folderpath_)) {
-      fs::create_directory(persist_node_info_folderpath_);
-    }
-
-    persist_data_folderpath_ = index_persist_folderpath_ + "data/";
-    if (!fs::is_directory(persist_data_folderpath_)) {
-      fs::create_directory(persist_data_folderpath_);
-    }
-
-    if (require_neurofilter_) {
-      persist_filters_folderpath_ = index_persist_folderpath_ + "filter/";
-      if (!fs::is_directory(persist_filters_folderpath_)) {
-        fs::create_directory(persist_filters_folderpath_);
-      }
-    }
   }
 
   if (batch_load_nseries_ < 0) {
@@ -278,6 +254,77 @@ dstree::Config::Config(int argc, char *argv[]) :
 
     is_sketch_provided_ = true;
   }
+
+  if (on_disk_ || to_dump_index_) {
+    if (vm.count("index_dump_folderpath")) {
+      index_dump_folderpath_ = fs::system_complete(index_dump_folderpath_).string();
+    } else {
+      index_dump_folderpath_ = fs::absolute(fs::path(log_filepath_).parent_path()).string();
+    }
+
+    if (!fs::is_directory(index_dump_folderpath_)) {
+      fs::create_directory(index_dump_folderpath_);
+    }
+
+    if (!boost::algorithm::ends_with(index_dump_folderpath_, "/")) {
+      index_dump_folderpath_ += "/";
+    }
+
+    dump_node_info_folderpath_ = index_dump_folderpath_ + "node/";
+    if (!fs::is_directory(dump_node_info_folderpath_)) {
+      fs::create_directory(dump_node_info_folderpath_);
+    }
+
+    dump_data_folderpath_ = index_dump_folderpath_ + "data/";
+    if (!fs::is_directory(dump_data_folderpath_)) {
+      fs::create_directory(dump_data_folderpath_);
+    }
+
+    if (require_neurofilter_) {
+      dump_filters_folderpath_ = index_dump_folderpath_ + "filter/";
+      if (!fs::is_directory(dump_filters_folderpath_)) {
+        fs::create_directory(dump_filters_folderpath_);
+      }
+    }
+  }
+
+  if (to_load_index_) {
+    if (vm.count("index_load_folderpath")) {
+      index_load_folderpath_ = fs::system_complete(index_load_folderpath_).string();
+    } else {
+      std::cout << "Please specify index_load_folderpath" << std::endl;
+      exit(-1);
+    }
+
+    if (!fs::is_directory(index_load_folderpath_)) {
+      std::cout << "Empty index_load_folderpath found: " << index_load_folderpath_ << std::endl;
+      exit(-1);
+    }
+
+    if (!boost::algorithm::ends_with(index_load_folderpath_, "/")) {
+      index_load_folderpath_ += "/";
+    }
+
+    load_node_info_folderpath_ = index_load_folderpath_ + "node/";
+    if (!fs::is_directory(load_node_info_folderpath_)) {
+      std::cout << "Empty load_node_info_folderpath found: " << load_node_info_folderpath_ << std::endl;
+      exit(-1);
+    }
+
+    load_data_folderpath_ = index_load_folderpath_ + "data/";
+    if (!fs::is_directory(load_data_folderpath_)) {
+      std::cout << "Empty load_data_folderpath found: " << load_data_folderpath_ << std::endl;
+      exit(-1);
+    }
+
+    if (require_neurofilter_) {
+      load_filters_folderpath_ = index_load_folderpath_ + "filter/";
+      if (!fs::is_directory(load_filters_folderpath_)) {
+        std::cout << "Empty load_filters_folderpath found: " << load_filters_folderpath_ << std::endl;
+        exit(-1);
+      }
+    }
+  }
 }
 
 void dstree::Config::log() {
@@ -298,8 +345,8 @@ void dstree::Config::log() {
   spdlog::info("default_nbuffer = {:d}", default_nbuffer_);
 
   spdlog::info("on_disk = {:b}", on_disk_);
-  spdlog::info("index_persist_folderpath = {:s}", index_persist_folderpath_);
-  spdlog::info("index_persist_file_postfix = {:s}", index_persist_file_postfix_);
+  spdlog::info("index_dump_folderpath = {:s}", index_dump_folderpath_);
+  spdlog::info("index_dump_file_postfix = {:s}", index_dump_file_postfix_);
 
   spdlog::info("node_nchild = {:d}", node_nchild_);
   spdlog::info("vertical_split_nsubsegment = {:d}", vertical_split_nsubsegment_);
@@ -347,9 +394,16 @@ void dstree::Config::log() {
 
   spdlog::info("filter_query_noise_level = {:.3f}", filter_query_noise_level_);
 
-  spdlog::info("to_persist_index = {:b}", to_persist_index_);
-  spdlog::info("model_persist_file_postfix = {:s}", model_persist_file_postfix_);
-  spdlog::info("persist_node_info_folderpath = {:s}", persist_node_info_folderpath_);
-  spdlog::info("persist_filters_folderpath = {:s}", persist_filters_folderpath_);
-  spdlog::info("persist_data_folderpath = {:s}", persist_data_folderpath_);
+  spdlog::info("to_dump_index = {:b}", to_dump_index_);
+  spdlog::info("model_dump_file_postfix = {:s}", model_dump_file_postfix_);
+  spdlog::info("dump_node_info_folderpath = {:s}", dump_node_info_folderpath_);
+  spdlog::info("dump_filters_folderpath = {:s}", dump_filters_folderpath_);
+  spdlog::info("dump_data_folderpath = {:s}", dump_data_folderpath_);
+
+
+  spdlog::info("to_load_index = {:b}", to_load_index_);
+  spdlog::info("index_load_folderpath = {:s}", index_load_folderpath_);
+  spdlog::info("dump_node_info_folderpath = {:s}", load_node_info_folderpath_);
+  spdlog::info("load_filters_folderpath = {:s}", load_filters_folderpath_);
+  spdlog::info("load_data_folderpath = {:s}", load_data_folderpath_);
 }

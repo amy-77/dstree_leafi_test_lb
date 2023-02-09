@@ -10,9 +10,12 @@
 #include <utility>
 
 #include <spdlog/spdlog.h>
+#include <boost/filesystem.hpp>
 
 #include "stat.h"
 #include "distance.h"
+
+namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
 namespace constant = upcite::constant;
@@ -640,7 +643,6 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
                                 VALUE_TYPE bsf_distance) const {
   const VALUE_TYPE *db_series_ptr = buffer_.get().get_next_series_ptr();
   VALUE_TYPE local_bsf = constant::MAX_VALUE;
-  VALUE_TYPE distance;
 
   while (db_series_ptr != nullptr) {
     VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_.get().series_length_);
@@ -669,35 +671,39 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 RESPONSE dstree::Node::log() {
   spdlog::info("node {:d}: depth = {:d}, size = {:d}", id_, depth_, nseries_);
 
+  for (ID_TYPE i = 0; i < children_.size(); ++i) {
+    children_[i]->log();
+  }
+
   return SUCCESS;
 }
 
 RESPONSE dstree::Node::dump(void *ofs_buf) const {
-  std::string node_info_filepath = config_.get().persist_node_info_folderpath_ + std::to_string(id_) +
-      config_.get().index_persist_file_postfix_;
+  std::string node_info_filepath = config_.get().dump_node_info_folderpath_ + std::to_string(id_) +
+      config_.get().index_dump_file_postfix_;
 
-  std::ofstream node_fos(node_info_filepath, std::ios::out | std::ios::binary);
+  std::ofstream node_ofs(node_info_filepath, std::ios::out | std::ios::binary);
 //  assert(node_fos.is_open());
 
   auto ofs_id_buf = reinterpret_cast<ID_TYPE *>(ofs_buf);
 
-  node_fos.write(reinterpret_cast<const char *>(&id_), sizeof(ID_TYPE));
-  node_fos.write(reinterpret_cast<const char *>(&depth_), sizeof(ID_TYPE));
-  node_fos.write(reinterpret_cast<const char *>(&nseries_), sizeof(ID_TYPE));
+  node_ofs.write(reinterpret_cast<const char *>(&id_), sizeof(ID_TYPE));
+  node_ofs.write(reinterpret_cast<const char *>(&depth_), sizeof(ID_TYPE));
+  node_ofs.write(reinterpret_cast<const char *>(&nseries_), sizeof(ID_TYPE));
 
-  eapca_envelope_->dump(node_fos);
+  eapca_envelope_->dump(node_ofs);
 
   ofs_id_buf[0] = static_cast<ID_TYPE>(children_.size());
-  node_fos.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
+  node_ofs.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
 
   if (!children_.empty()) {
     for (ID_TYPE i = 0; i < children_.size(); ++i) {
       ofs_id_buf[i] = children_[i]->id_;
     }
 
-    node_fos.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE) * children_.size());
+    node_ofs.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE) * children_.size());
 
-    split_->dump(node_fos, ofs_buf);
+    split_->dump(node_ofs, ofs_buf);
   }
 
   if (neurofilter_ != nullptr) {
@@ -705,10 +711,10 @@ RESPONSE dstree::Node::dump(void *ofs_buf) const {
   } else {
     ofs_id_buf[0] = -1;
   }
-  node_fos.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
+  node_ofs.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
 
   if (neurofilter_ != nullptr) {
-    neurofilter_->dump(node_fos);
+    neurofilter_->dump(node_ofs);
   }
 
   if (buffer_.get().size() > 0) {
@@ -716,18 +722,116 @@ RESPONSE dstree::Node::dump(void *ofs_buf) const {
   } else {
     ofs_id_buf[0] = -1;
   }
-  node_fos.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
+  node_ofs.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
 
   if (buffer_.get().size() > 0) {
     buffer_.get().dump();
   }
 
 //  assert(node_fos.good());
-  node_fos.close();
+  node_ofs.close();
 
   if (!children_.empty()) {
     for (ID_TYPE i = 0; i < children_.size(); ++i) {
       children_[i]->dump(ofs_buf);
+    }
+  }
+
+  return SUCCESS;
+}
+
+RESPONSE dstree::Node::load(void *ifs_buf,
+                            dstree::BufferManager &buffer_manager) {
+  std::string node_info_filepath = config_.get().load_node_info_folderpath_ + std::to_string(id_) +
+      config_.get().index_dump_file_postfix_;
+
+  if (!fs::is_directory(node_info_filepath)) {
+    spdlog::error("Empty node_info_filepath found: {:s}", node_info_filepath);
+    return FAILURE;
+  }
+
+  std::ifstream node_ifs(node_info_filepath, std::ios::in | std::ios::binary);
+//  assert(node_ifs.is_open());
+
+  auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
+
+  // id_, depth_, nseries_
+  ID_TYPE read_nbytes = sizeof(ID_TYPE) * 3;
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  id_ = ifs_id_buf[0];
+  depth_ = ifs_id_buf[1];
+  nseries_ = ifs_id_buf[2];
+
+  RESPONSE status = eapca_envelope_->load(node_ifs, ifs_buf);
+
+  if (status == FAILURE) {
+    spdlog::error("node {:d} eapca_envelope loading failed", id_);
+    node_ifs.close();
+    return FAILURE;
+  }
+
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  ID_TYPE nchildren = ifs_id_buf[0];
+
+  if (nchildren > 0) {
+    read_nbytes = sizeof(ID_TYPE) * nchildren;
+    node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+
+    for (ID_TYPE i = 0; i < nchildren; ++i) {
+      children_.emplace_back(std::make_unique<dstree::Node>(config_, buffer_manager, depth_ + 1, ifs_id_buf[i]));
+    }
+
+    status = split_->load(node_ifs, ifs_buf);
+
+    if (status == FAILURE) {
+      spdlog::error("node {:d} split loading failed", id_);
+      node_ifs.close();
+      return FAILURE;
+    }
+  }
+
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  ID_TYPE filter_id = ifs_id_buf[0];
+
+  if (filter_id >= 0) {
+    neurofilter_ = std::make_unique<dstree::Filter>(config_, filter_id, constant::TENSOR_PLACEHOLDER_REF);
+    status = neurofilter_->load(node_ifs, ifs_buf);
+
+    if (status == FAILURE) {
+      spdlog::error("node {:d} neurofilter loading failed", id_);
+      node_ifs.close();
+      return FAILURE;
+    }
+  }
+
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  ID_TYPE has_buffer = ifs_id_buf[0];
+
+  if (has_buffer > 0) {
+    status = buffer_.get().load(ifs_buf);
+
+    if (status == FAILURE) {
+      spdlog::error("node {:d} buffer loading failed", id_);
+      node_ifs.close();
+      return FAILURE;
+    }
+  }
+
+//  assert(node_ifs.good());
+  node_ifs.close();
+
+  if (!children_.empty()) {
+    for (ID_TYPE i = 0; i < children_.size(); ++i) {
+      status = children_[i]->load(ifs_buf, buffer_manager);
+
+      if (status == FAILURE) {
+        spdlog::error("child {:d} of {:d} loading failed", children_[i]->get_id(), id_);
+        node_ifs.close();
+        return FAILURE;
+      }
     }
   }
 

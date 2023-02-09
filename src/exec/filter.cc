@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include <spdlog/spdlog.h>
+#include <boost/filesystem.hpp>
 #include <torch/data/example.h>
 #include <torch/data/datasets/base.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -15,6 +16,8 @@
 
 #include "str.h"
 #include "scheduler.h"
+
+namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
 
@@ -436,10 +439,43 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
   node_fos.write(reinterpret_cast<const char *>(bsf_distances_.data()), sizeof(VALUE_TYPE) * bsf_distances_.size());
   node_fos.write(reinterpret_cast<const char *>(nn_distances_.data()), sizeof(VALUE_TYPE) * nn_distances_.size());
 
-  std::string model_filepath = config_.get().persist_filters_folderpath_ + std::to_string(id_) +
-      config_.get().model_persist_file_postfix_;
+  std::string model_filepath = config_.get().dump_filters_folderpath_ + std::to_string(id_) +
+      config_.get().model_dump_file_postfix_;
 
   torch::save(model_, model_filepath);
+
+  return SUCCESS;
+}
+
+RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
+  auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
+  auto ifs_value_buf = reinterpret_cast<VALUE_TYPE *>(ifs_buf);
+
+  // train_size_
+  ID_TYPE read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  train_size_ = ifs_id_buf[0];
+
+  read_nbytes = sizeof(VALUE_TYPE) * train_size_;
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  bsf_distances_.insert(bsf_distances_.begin(), ifs_value_buf, ifs_value_buf + train_size_);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  nn_distances_.insert(nn_distances_.begin(), ifs_value_buf, ifs_value_buf + train_size_);
+
+  std::string model_filepath = config_.get().dump_filters_folderpath_ + std::to_string(id_) +
+      config_.get().model_dump_file_postfix_;
+
+  if (!fs::is_directory(model_filepath)) {
+    std::cout << "Empty model_filepath found: " << model_filepath << std::endl;
+    return FAILURE;
+  }
+
+  torch::load(model_, model_filepath);
+  model_->eval();
+//  net->to(torch::Device(torch::kCPU));
+
+  c10::cuda::CUDACachingAllocator::emptyCache();
+  is_trained_ = true;
 
   return SUCCESS;
 }

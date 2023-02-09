@@ -35,8 +35,21 @@ int main(int argc, char *argv[]) {
 
   std::unique_ptr<dstree::Index> index = std::make_unique<dstree::Index>(*config);
 
-  index->build();
-  index->dump();
+  RESPONSE status;
+
+  if (config->to_load_index_) {
+    status = index->load();
+  } else {
+    status = index->build();
+
+    if (config->on_disk_ || config->to_dump_index_) {
+      index->dump();
+    }
+  }
+
+  if (status == FAILURE) {
+    exit(-1);
+  }
 
   index->search();
 

@@ -100,6 +100,8 @@ class Node {
   RESPONSE log();
 
   RESPONSE dump(void *ofs_buf) const;
+  RESPONSE load(void *ifs_buf,
+                dstree::BufferManager &buffer_manager);
 
  private:
   ID_TYPE depth_, id_;

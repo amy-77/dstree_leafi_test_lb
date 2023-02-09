@@ -28,7 +28,8 @@ class Split {
 
   ID_TYPE route(VALUE_TYPE value) const;
 
-  RESPONSE dump(std::ofstream &node_fos, void *ofs_buf) const;
+  RESPONSE dump(std::ofstream &node_ofs, void *ofs_buf) const;
+  RESPONSE load(std::ifstream &node_ifs, void *ifs_buf);
 
   Split &operator=(const Split &split);
 

@@ -44,8 +44,6 @@ class Config {
   ID_TYPE default_nbuffer_;
 
   bool on_disk_;
-  std::string index_persist_folderpath_;
-  std::string index_persist_file_postfix_;
 
   ID_TYPE node_nchild_;
   ID_TYPE vertical_split_nsubsegment_;
@@ -89,11 +87,20 @@ class Config {
 
   VALUE_TYPE filter_query_noise_level_;
 
-  bool to_persist_index_;
-  std::string model_persist_file_postfix_;
-  std::string persist_node_info_folderpath_;
-  std::string persist_filters_folderpath_;
-  std::string persist_data_folderpath_;
+  bool to_dump_index_;
+  std::string index_dump_folderpath_;
+  std::string dump_node_info_folderpath_; // predefined child folder
+  std::string dump_filters_folderpath_; // predefined child folder
+  std::string dump_data_folderpath_; // predefined child folder
+
+  std::string index_dump_file_postfix_;
+  std::string model_dump_file_postfix_;
+
+  bool to_load_index_;
+  std::string index_load_folderpath_;
+  std::string load_node_info_folderpath_; // predefined child folder
+  std::string load_filters_folderpath_; // predefined child folder
+  std::string load_data_folderpath_; // predefined child folder
 };
 
 }

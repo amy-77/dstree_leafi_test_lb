@@ -216,7 +216,7 @@ dstree::Config::Config(int argc, char *argv[]) :
       filter_dim_latent_ = series_length_;
     }
 
-    if (filter_train_nexample_ < 0) {
+    if (filter_train_nexample_ < 0 && !to_load_index_) {
       std::cout << "Please specify the number of neurofilter train examples by setting --neurofilter_train_nexample"
                 << std::endl;
       exit(-1);
@@ -399,7 +399,6 @@ void dstree::Config::log() {
   spdlog::info("dump_node_info_folderpath = {:s}", dump_node_info_folderpath_);
   spdlog::info("dump_filters_folderpath = {:s}", dump_filters_folderpath_);
   spdlog::info("dump_data_folderpath = {:s}", dump_data_folderpath_);
-
 
   spdlog::info("to_load_index = {:b}", to_load_index_);
   spdlog::info("index_load_folderpath = {:s}", index_load_folderpath_);

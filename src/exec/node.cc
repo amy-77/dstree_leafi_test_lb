@@ -741,11 +741,13 @@ RESPONSE dstree::Node::dump(void *ofs_buf) const {
 }
 
 RESPONSE dstree::Node::load(void *ifs_buf,
-                            dstree::BufferManager &buffer_manager) {
+                            dstree::BufferManager &buffer_manager,
+                            ID_TYPE &nnode,
+                            ID_TYPE &nleaf) {
   std::string node_info_filepath = config_.get().load_node_info_folderpath_ + std::to_string(id_) +
       config_.get().index_dump_file_postfix_;
 
-  if (!fs::is_directory(node_info_filepath)) {
+  if (!fs::is_regular_file(node_info_filepath)) {
     spdlog::error("Empty node_info_filepath found: {:s}", node_info_filepath);
     return FAILURE;
   }
@@ -820,20 +822,33 @@ RESPONSE dstree::Node::load(void *ifs_buf,
     }
   }
 
+  // TODO some nodes report node_ifs.good() == 0
 //  assert(node_ifs.good());
   node_ifs.close();
 
   if (!children_.empty()) {
-    for (ID_TYPE i = 0; i < children_.size(); ++i) {
-      status = children_[i]->load(ifs_buf, buffer_manager);
+    for (const auto & child : children_) {
+      status = child->load(ifs_buf, buffer_manager, nnode, nleaf);
 
       if (status == FAILURE) {
-        spdlog::error("child {:d} of {:d} loading failed", children_[i]->get_id(), id_);
+        spdlog::error("child {:d} of {:d} loading failed", child->get_id(), id_);
         node_ifs.close();
         return FAILURE;
       }
     }
+
+    spdlog::info("subtree {:d} loaded", id_);
+  } else {
+    if (nseries_ == buffer_.get().size()) {
+      spdlog::info("leaf {:d} loaded {:d}", id_, nseries_);
+
+      nleaf += 1;
+    } else {
+      spdlog::error("leaf {:d} loaded {:d}; expected {:d}", id_, buffer_.get().size(), nseries_);
+      return FAILURE;
+    }
   }
 
+  nnode += 1;
   return SUCCESS;
 }

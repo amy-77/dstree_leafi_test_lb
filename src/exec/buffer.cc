@@ -238,8 +238,9 @@ dstree::BufferManager::~BufferManager() {
 
 dstree::Buffer &dstree::BufferManager::create_node_buffer(ID_TYPE node_id) {
   auto buffer_id = static_cast<ID_TYPE>(node_buffers_.size());
-  std::string buffer_filepath = config_.get().dump_data_folderpath_ + std::to_string(node_id) +
-      config_.get().index_dump_file_postfix_;
+  std::string buffer_filepath = (config_.get().to_load_index_ ? config_.get().load_data_folderpath_ :
+                                 config_.get().dump_data_folderpath_)
+      + std::to_string(node_id) + config_.get().index_dump_file_postfix_;
 
   node_buffers_.emplace_back(std::make_unique<dstree::Buffer>(
       config_.get().on_disk_,

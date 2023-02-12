@@ -40,8 +40,8 @@ const ID_TYPE STR_DEFAULT_SIZE = 65536;
 
 const std::string LOGGER_NAME = "file_logger_mt";
 
-torch::Tensor TENSOR_PLACEHOLDER = at::empty(0);
-std::reference_wrapper<torch::Tensor> TENSOR_PLACEHOLDER_REF = std::ref(TENSOR_PLACEHOLDER);
+extern torch::Tensor TENSOR_PLACEHOLDER;
+extern std::reference_wrapper<torch::Tensor> TENSOR_PLACEHOLDER_REF;
 
 }
 }

@@ -93,8 +93,10 @@ dstree::Filter::Filter(dstree::Config &config,
                                          config.filter_leaky_relu_negative_slope_);
   model_->to(*device_);
 
-  bsf_distances_.reserve(config.filter_train_nexample_);
-  nn_distances_.reserve(config.filter_train_nexample_);
+  if (!config.to_load_index_) {
+    bsf_distances_.reserve(config.filter_train_nexample_);
+    nn_distances_.reserve(config.filter_train_nexample_);
+  }
 }
 
 RESPONSE dstree::Filter::train() {
@@ -462,11 +464,11 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   nn_distances_.insert(nn_distances_.begin(), ifs_value_buf, ifs_value_buf + train_size_);
 
-  std::string model_filepath = config_.get().dump_filters_folderpath_ + std::to_string(id_) +
+  std::string model_filepath = config_.get().load_filters_folderpath_ + std::to_string(id_) +
       config_.get().model_dump_file_postfix_;
 
-  if (!fs::is_directory(model_filepath)) {
-    std::cout << "Empty model_filepath found: " << model_filepath << std::endl;
+  if (!fs::is_regular_file(model_filepath)) {
+    spdlog::error("Empty model_filepath found: {:s}", model_filepath);
     return FAILURE;
   }
 

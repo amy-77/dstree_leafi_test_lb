@@ -33,6 +33,14 @@ dstree::Index::Index(Config &config) :
 
   root_ = std::make_unique<dstree::Node>(config_, *buffer_manager_, 0, nnode_);
   nnode_ += 1, nleaf_ += 1;
+
+  if (config_.get().filter_infer_is_gpu_) {
+    // TODO support multiple devices
+    device_ = std::make_unique<torch::Device>(torch::kCUDA,
+                                              static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
+  } else {
+    device_ = std::make_unique<torch::Device>(torch::kCPU);
+  }
 }
 
 dstree::Index::~Index() {
@@ -715,14 +723,22 @@ RESPONSE dstree::Index::train() {
     filter_train();
   }
 
+  if (config_.get().filter_infer_is_gpu_) {
+    // TODO support multiple devices
+    device_ = std::make_unique<torch::Device>(torch::kCUDA,
+                                              static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
+  } else {
+    device_ = std::make_unique<torch::Device>(torch::kCPU);
+  }
+
   return SUCCESS;
 }
 
 RESPONSE dstree::Index::load() {
-  ID_TYPE ifs_buf_size = sizeof(ID_TYPE) * config_.get().series_length_ * 2; // 2x expanded for safety
+  ID_TYPE ifs_buf_size = sizeof(ID_TYPE) * config_.get().leaf_max_nseries_ * 2; // 2x expanded for safety
   void *ifs_buf = std::malloc(ifs_buf_size);
 
-  RESPONSE status = root_->load(ifs_buf);
+  RESPONSE status = root_->load(ifs_buf, std::ref(*buffer_manager_), nnode_, nleaf_);
 
   if (status == FAILURE) {
     spdlog::info("failed to load index");
@@ -731,6 +747,9 @@ RESPONSE dstree::Index::load() {
   }
 
   std::free(ifs_buf);
+
+  // TODO in-memory only; supports on-disk
+  buffer_manager_->load_batch();
 
   leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare>(
       Compare(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));

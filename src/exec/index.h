@@ -48,7 +48,7 @@ class Index {
   RESPONSE insert(ID_TYPE batch_series_id);
 
   RESPONSE filter_initialize(dstree::Node &node,
-                         ID_TYPE *filter_id);
+                             ID_TYPE *filter_id);
   RESPONSE filter_collect();
   RESPONSE filter_collect_mthread();
   RESPONSE filter_train();

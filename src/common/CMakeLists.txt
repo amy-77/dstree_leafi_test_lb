@@ -1,19 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(TARGET common)
-add_library(${TARGET}
-        SHARED common.h stat.h distance.h)
-
-set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-target_compile_features(${TARGET} PRIVATE cxx_std_14)
+set(TARGET common)
+add_library(${TARGET} SHARED config.cc global.cc)
 
-# -mavx -mavx2 -mavx512 -msse4.2 are supported by Intel(R) Xeon(R) Gold 6134 CPU @ 3.20GHz in andromache
-#target_compile_options(utils PUBLIC -march=native -msse4.2 -mavx)
-target_compile_options(${TARGET} PUBLIC -march=native -msse3 -msse4.2 -mavx -mavx2)
+set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
+target_compile_features(${TARGET} PRIVATE cxx_std_14)
+set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "BOOST_LOG_DYN_LINK")
 
 target_link_libraries(${TARGET}
-        PRIVATE util
+        PUBLIC ${TORCH_LIBRARIES} ${Boost_LIBRARIES} spdlog::spdlog
         )

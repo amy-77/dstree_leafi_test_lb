@@ -5,7 +5,7 @@
 
 #include "answer.h"
 
-#include "common.h"
+#include "vec.h"
 
 namespace dstree = upcite::dstree;
 namespace constant = upcite::constant;

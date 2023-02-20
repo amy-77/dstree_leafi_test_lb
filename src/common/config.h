@@ -11,8 +11,6 @@
 
 #include "global.h"
 
-#include "logger.h"
-
 namespace upcite {
 namespace dstree {
 
@@ -101,6 +99,12 @@ class Config {
   std::string load_node_info_folderpath_; // predefined child folder
   std::string load_filters_folderpath_; // predefined child folder
   std::string load_data_folderpath_; // predefined child folder
+
+  bool filter_is_conformal_;
+  std::string filter_conformal_core_type_;
+  VALUE_TYPE filter_conformal_confidence_;
+  VALUE_TYPE filter_conformal_default_confidence_;
+  VALUE_TYPE filter_conformal_train_val_split_;
 };
 
 }

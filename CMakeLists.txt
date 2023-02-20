@@ -30,16 +30,18 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 include_directories(
         ${Boost_INCLUDE_DIRS}
         ${TORCH_INCLUDE_DIRS}
-        src/util
         src/common
+        src/util
+        src/filter
         src/exec
 )
 
 add_subdirectory(lib/spdlog-1.11.0)
 #add_subdirectory(lib/fmt-9.1.0)
 
-add_subdirectory(src/util)
 add_subdirectory(src/common)
+add_subdirectory(src/util)
+add_subdirectory(src/filter)
 add_subdirectory(src/exec)
 
 add_compile_options(-O0)
@@ -49,7 +51,7 @@ add_compile_options(-O0)
 target_compile_features(${TARGET} PRIVATE cxx_std_14)
 
 target_link_libraries(${TARGET}
-        PRIVATE exec common util spdlog::spdlog #fmt::fmt
+        PRIVATE exec filter util common spdlog::spdlog #fmt::fmt
         )
 
 install(TARGETS ${TARGET} DESTINATION ${PROJECT_SOURCE_DIR}/bin)

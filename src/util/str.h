@@ -9,6 +9,7 @@
 #include <string>
 
 #include "global.h"
+#include "interval.h"
 
 namespace upcite {
 

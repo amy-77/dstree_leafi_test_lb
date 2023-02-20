@@ -15,7 +15,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#include "common.h"
+#include "vec.h"
 #include "eapca.h"
 #include "answer.h"
 
@@ -903,11 +903,11 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
 //#endif
 #endif
 
-                if (predicted_nn_distance < answer->get_bsf()) {
-                  node_to_visit.get().search(series_ptr, *answer, visited_node_counter, visited_series_counter);
-                } else {
+                if (predicted_nn_distance > answer->get_bsf()) {
                   nfpruned_node_counter += 1;
                   nfpruned_series_counter += node_to_visit.get().get_size();
+                } else {
+                  node_to_visit.get().search(series_ptr, *answer, visited_node_counter, visited_series_counter);
                 }
               } else {
                 node_to_visit.get().search(series_ptr, *answer, visited_node_counter, visited_series_counter);

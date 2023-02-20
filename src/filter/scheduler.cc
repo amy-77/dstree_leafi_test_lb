@@ -7,7 +7,7 @@
 
 #include <cmath>
 
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
 
 namespace constant = upcite::constant;
 

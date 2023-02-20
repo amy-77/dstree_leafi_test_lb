@@ -13,6 +13,7 @@
 
 #include "global.h"
 #include "config.h"
+#include "conformal.h"
 #include "model.h"
 
 namespace upcite {
@@ -49,6 +50,7 @@ class Filter {
 
 //  std::unique_ptr<FilterModel> model_;
   std::shared_ptr<FilterModel> model_; // torch::save only takes shared_ptr
+  std::unique_ptr<ConformalRegressor> conformal_predictor_;
 
   std::unique_ptr<torch::Device> device_; // TODO ref?
 

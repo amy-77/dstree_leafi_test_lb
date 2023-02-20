@@ -7,14 +7,16 @@
 
 #include <cmath>
 
-#include <spdlog/spdlog.h>
 #include <boost/filesystem.hpp>
 #include <torch/data/example.h>
 #include <torch/data/datasets/base.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include "spdlog/spdlog.h"
 
 #include "str.h"
+#include "vec.h"
+#include "intervel.h"
 #include "scheduler.h"
 
 namespace fs = boost::filesystem;
@@ -24,24 +26,27 @@ namespace dstree = upcite::dstree;
 class TORCH_API SeriesDataset
     : public torch::data::datasets::Dataset<SeriesDataset> {
  public:
-  explicit SeriesDataset(torch::Tensor &series,
-                         std::vector<VALUE_TYPE> &targets,
-                         int num_instances,
-                         torch::Device device) :
+  SeriesDataset(torch::Tensor &series,
+                std::vector<VALUE_TYPE> &targets,
+                int num_instances,
+                torch::Device device) :
       series_(std::move(series.clone())),
       targets_(torch::from_blob(targets.data(),
                                 num_instances,
-                                torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(device)) {}
+                                torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(device)) {
+  }
 
-  explicit SeriesDataset(torch::Tensor &series,
-                         torch::Tensor &targets,
-                         int num_instances,
-                         torch::Device device) :
+  SeriesDataset(torch::Tensor &series,
+                torch::Tensor &targets,
+                int num_instances,
+                torch::Device device) :
       series_(std::move(series.clone())),
-      targets_(std::move(targets.clone())) {}
+      targets_(std::move(targets.clone())) {
+  }
 
   torch::data::Example<> get(size_t index) override {
-    return {series_[index], targets_[index]};
+    return {
+        series_[index], targets_[index]};
   }
 
   torch::optional<size_t> size() const override {
@@ -96,6 +101,13 @@ dstree::Filter::Filter(dstree::Config &config,
   if (!config.to_load_index_) {
     bsf_distances_.reserve(config.filter_train_nexample_);
     nn_distances_.reserve(config.filter_train_nexample_);
+  }
+
+  if (config.filter_is_conformal_) {
+    conformal_predictor_ = std::make_unique<upcite::ConformalRegressor>(config.filter_conformal_core_type_,
+                                                                        config.filter_conformal_confidence_);
+  } else {
+    conformal_predictor_ = nullptr;
   }
 }
 
@@ -391,6 +403,37 @@ RESPONSE dstree::Filter::train() {
 //#endif
 #endif
 
+  if (config_.get().filter_is_conformal_) {
+    ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+
+    c10::InferenceMode guard;
+    model_->eval();
+
+    torch::Tensor prediction = model_->forward(valid_data);
+    auto predictions_array = prediction.accessor<VALUE_TYPE, 1>().data();
+
+    std::vector<VALUE_TYPE> residuals;
+    residuals.reserve(num_conformal_examples);
+    for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
+      residuals.emplace_back(predictions_array[i] - nn_distances_[num_train_examples + i]);
+    }
+
+    conformal_predictor_->fit(residuals);
+
+#ifdef DEBUG
+//#ifndef DEBUGGED
+    auto y_hat = upcite::make_reserved<VALUE_TYPE>(num_valid_examples - num_conformal_examples);
+    y_hat.assign(predictions_array + num_conformal_examples, predictions_array + num_valid_examples);
+
+    std::vector<INTERVAL> y_intervals = conformal_predictor_->predict(y_hat);
+
+    spdlog::info("stream {:d} filter {:d} d_interval{:s} eval = {:s}",
+                 stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
+                 upcite::get_str(y_intervals.data(), y_intervals.size()));
+//#endif
+#endif
+  }
+
 #ifdef DEBUG
   if (torch::cuda::is_available() && id_ == 0) {
     size_t memory_size = 0;
@@ -424,6 +467,9 @@ VALUE_TYPE dstree::Filter::infer(torch::Tensor &query_series) const {
     torch::NoGradGuard no_grad;
 
     VALUE_TYPE pred = model_->forward(query_series).item<VALUE_TYPE>();
+    if (conformal_predictor_ != nullptr) {
+      pred = conformal_predictor_->predict(pred).left_bound_;
+    }
 
     if (config_.get().filter_remove_square_) {
       return pred * pred;
@@ -440,6 +486,10 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
 
   node_fos.write(reinterpret_cast<const char *>(bsf_distances_.data()), sizeof(VALUE_TYPE) * bsf_distances_.size());
   node_fos.write(reinterpret_cast<const char *>(nn_distances_.data()), sizeof(VALUE_TYPE) * nn_distances_.size());
+
+  if (config_.get().filter_is_conformal_) {
+    conformal_predictor_->dump(node_fos);
+  }
 
   std::string model_filepath = config_.get().dump_filters_folderpath_ + std::to_string(id_) +
       config_.get().model_dump_file_postfix_;
@@ -463,6 +513,11 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   bsf_distances_.insert(bsf_distances_.begin(), ifs_value_buf, ifs_value_buf + train_size_);
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   nn_distances_.insert(nn_distances_.begin(), ifs_value_buf, ifs_value_buf + train_size_);
+
+  if (config_.get().filter_is_conformal_) {
+    // TODO support ad hoc cases?
+    conformal_predictor_->load(node_ifs, ifs_buf);
+  }
 
   std::string model_filepath = config_.get().load_filters_folderpath_ + std::to_string(id_) +
       config_.get().model_dump_file_postfix_;

@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "global.h"
-#include "intervel.h"
+#include "interval.h"
 
 namespace upcite {
 
@@ -23,6 +23,8 @@ class ConformalPredictor {
  public:
   ConformalPredictor() : is_fitted_(false) {};
   ~ConformalPredictor() = default;
+
+  VALUE_TYPE get_alpha(VALUE_TYPE confidence) const;
 
   RESPONSE dump(std::ofstream &node_fos) const;
   RESPONSE load(std::ifstream &node_ifs, void *ifs_buf);

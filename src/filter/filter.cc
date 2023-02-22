@@ -16,7 +16,8 @@
 
 #include "str.h"
 #include "vec.h"
-#include "intervel.h"
+#include "comp.h"
+#include "interval.h"
 #include "scheduler.h"
 
 namespace fs = boost::filesystem;
@@ -45,8 +46,7 @@ class TORCH_API SeriesDataset
   }
 
   torch::data::Example<> get(size_t index) override {
-    return {
-        series_[index], targets_[index]};
+    return {series_[index], targets_[index]};
   }
 
   torch::optional<size_t> size() const override {
@@ -404,33 +404,65 @@ RESPONSE dstree::Filter::train() {
 #endif
 
   if (config_.get().filter_is_conformal_) {
-    ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
-
     c10::InferenceMode guard;
     model_->eval();
 
     torch::Tensor prediction = model_->forward(valid_data);
-    auto predictions_array = prediction.accessor<VALUE_TYPE, 1>().data();
+    VALUE_TYPE *predictions_array = prediction.detach().cpu().contiguous().data_ptr<VALUE_TYPE>();
 
-    std::vector<VALUE_TYPE> residuals;
-    residuals.reserve(num_conformal_examples);
+    ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+    auto residuals = upcite::make_reserved<VALUE_TYPE>(num_conformal_examples);
+
     for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
-      residuals.emplace_back(predictions_array[i] - nn_distances_[num_train_examples + i]);
+      // TODO torch::Tensor to ptr is not stable
+      if (predictions_array[i] > constant::MIN_VALUE && predictions_array[i] < constant::MAX_VALUE &&
+          !upcite::equals_zero(predictions_array[i])) {
+#ifdef DEBUG
+#ifndef DEBUGGED
+        spdlog::info("stream {:d} filter {:d} conformal train target {:d} = {:f}",
+                     stream_id, id_, i, nn_distances_[num_train_examples + i]);
+        spdlog::info("stream {:d} filter {:d} conformal train prediction {:d} = {:f}",
+                     stream_id, id_, i, predictions_array[i]);
+#endif
+#endif
+
+        residuals.emplace_back(predictions_array[i] - nn_distances_[num_train_examples + i]);
+      }
     }
 
     conformal_predictor_->fit(residuals);
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+    spdlog::info(
+        "stream {:d} filter {:d} conformal confidence (one side-)interval {:.3f}@0.50, {:.3f}@0.90, {:.3f}@0.95, {:.3f}@0.99",
+        stream_id,
+        id_,
+        conformal_predictor_->get_alpha(0.5),
+        conformal_predictor_->get_alpha(0.9),
+        conformal_predictor_->get_alpha(0.95),
+        conformal_predictor_->get_alpha(0.99));
+
+    if (!upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.5)) &&
+        !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.9)) &&
+        !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.95)) &&
+        !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.99))) {
+      spdlog::info("stream {:d} filter {:d} conformal confidence (one side-)interval {:.3f}@{:.3f}",
+                   stream_id,
+                   id_,
+                   conformal_predictor_->get_alpha(config_.get().filter_conformal_confidence_),
+                   config_.get().filter_conformal_confidence_);
+    }
+
+#ifndef DEBUGGED
+    // TODO not necessary for global symmetrical confidence intervals
     auto y_hat = upcite::make_reserved<VALUE_TYPE>(num_valid_examples - num_conformal_examples);
     y_hat.assign(predictions_array + num_conformal_examples, predictions_array + num_valid_examples);
-
     std::vector<INTERVAL> y_intervals = conformal_predictor_->predict(y_hat);
 
     spdlog::info("stream {:d} filter {:d} d_interval{:s} eval = {:s}",
                  stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
                  upcite::get_str(y_intervals.data(), y_intervals.size()));
-//#endif
+#endif
 #endif
   }
 

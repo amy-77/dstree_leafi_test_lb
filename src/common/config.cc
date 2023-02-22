@@ -12,6 +12,8 @@
 #include <boost/program_options.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 
+#include "comp.h"
+
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
 namespace constant = upcite::constant;
@@ -74,7 +76,12 @@ dstree::Config::Config(int argc, char *argv[]) :
     index_load_folderpath_(""),
     load_node_info_folderpath_(""),
     load_filters_folderpath_(""),
-    load_data_folderpath_("") {
+    load_data_folderpath_(""),
+    filter_is_conformal_(false),
+    filter_conformal_core_type_("histogram"),
+    filter_conformal_confidence_(-1),
+    filter_conformal_default_confidence_(0.95),
+    filter_conformal_train_val_split_(0.9) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -176,7 +183,16 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("load_index", po::bool_switch(&to_load_index_)->default_value(false),
        "Whether to load the index structure")
       ("index_load_folderpath", po::value<std::string>(&index_load_folderpath_),
-       "Index load root folderpath");
+       "Index load root folderpath")
+      ("filter_is_conformal", po::bool_switch(&filter_is_conformal_)->default_value(false),
+       "Whether to use conformal filters")
+      ("filter_conformal_core_type", po::value<std::string>(&filter_conformal_core_type_)->default_value("histogram"),
+       "Filter conformal core type (histogram, mlp; defaults: histogram)")
+      ("filter_conformal_confidence", po::value<VALUE_TYPE>(&filter_conformal_confidence_)->default_value(-1),
+       "Filter conformal confidence level ([0, 1])")
+      ("filter_conformal_train_val_split",
+       po::value<VALUE_TYPE>(&filter_conformal_train_val_split_)->default_value(0.9),
+       "Filter conformal train/val split ratio");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -237,6 +253,18 @@ dstree::Config::Config(int argc, char *argv[]) :
     if (filter_train_is_mthread_) {
       if (filter_collect_nthread_ < 0) {
         filter_collect_nthread_ = filter_train_nthread_;
+      }
+    }
+
+    if (filter_is_conformal_) {
+      if (filter_conformal_confidence_ < 0 || filter_conformal_confidence_ > 1) {
+        if (!upcite::is_equal(filter_conformal_confidence_, static_cast<VALUE_TYPE>(-1))) {
+          std::cout << "Filter conformal confidence level " << filter_conformal_confidence_
+                    << " is invalid; revert to default (" << filter_conformal_default_confidence_ << ")"
+                    << std::endl;
+        }
+
+        filter_conformal_confidence_ = filter_conformal_default_confidence_;
       }
     }
   }
@@ -405,4 +433,10 @@ void dstree::Config::log() {
   spdlog::info("dump_node_info_folderpath = {:s}", load_node_info_folderpath_);
   spdlog::info("load_filters_folderpath = {:s}", load_filters_folderpath_);
   spdlog::info("load_data_folderpath = {:s}", load_data_folderpath_);
+
+  spdlog::info("filter_is_conformal = {:b}", filter_is_conformal_);
+  spdlog::info("filter_conformal_core_type = {:s}", filter_conformal_core_type_);
+  spdlog::info("filter_conformal_confidence = {:.3f}", filter_conformal_confidence_);
+  spdlog::info("filter_conformal_default_confidence = {:.3f}", filter_conformal_default_confidence_);
+  spdlog::info("filter_conformal_train_val_split = {:.3f}", filter_conformal_train_val_split_);
 }

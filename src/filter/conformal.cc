@@ -3,14 +3,14 @@
 // Copyright (c) 2023 Université Paris Cité. All rights reserved.
 //
 
+#include "conformal.h"
+
 #include <algorithm>
 
 #include "spdlog/spdlog.h"
 
 #include "comp.h"
 #include "vec.h"
-
-#include "conformal.h"
 
 upcite::ConformalRegressor::ConformalRegressor(std::string core_type_str,
                                                VALUE_TYPE confidence) {
@@ -70,7 +70,6 @@ std::vector<upcite::INTERVAL> upcite::ConformalRegressor::predict(std::vector<VA
     confidence_ = confidence;
   }
 
-
   auto y_intervals = upcite::make_reserved<upcite::INTERVAL>(y_hat.size());
 
   for (VALUE_TYPE y_i : y_hat) {
@@ -110,3 +109,19 @@ RESPONSE upcite::ConformalPredictor::load(std::ifstream &node_ifs, void *ifs_buf
 
   return SUCCESS;
 }
+
+VALUE_TYPE upcite::ConformalPredictor::get_alpha(VALUE_TYPE confidence) const {
+  if (is_fitted_) {
+    if (confidence >= 0 && confidence <= 1) {
+      if (upcite::is_equal(confidence_, confidence)) {
+        return alpha_;
+      } else {
+        ID_TYPE confidence_id = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence);
+        return alphas_[confidence_id];
+      }
+    }
+  }
+
+  return constant::MAX_VALUE;
+}
+

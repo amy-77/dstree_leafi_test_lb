@@ -25,7 +25,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(TEST_TENSOR test_tensor)
 
-add_executable(${TEST_TENSOR} test_tensor.cc)
+add_executable(${TEST_TENSOR} test_tensor.cc logger.cc)
 set_property(TARGET ${TEST_TENSOR} PROPERTY CXX_STANDARD 14)
 
 target_compile_features(${TEST_TENSOR} PRIVATE cxx_std_14)

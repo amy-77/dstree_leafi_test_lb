@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 set(TARGET util)
 add_library(${TARGET}
-        SHARED stat.h distance.h intervel.h vec.h comp.h str.h)
+        SHARED stat.h distance.h interval.h vec.h comp.h str.h)
 
 set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 set(CMAKE_CXX_STANDARD 14)

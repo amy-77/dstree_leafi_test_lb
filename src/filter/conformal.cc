@@ -19,7 +19,7 @@ upcite::ConformalRegressor::ConformalRegressor(std::string core_type_str,
   } else if (core_type_str == "mlp") {
     spdlog::error("conformal core {:s} is not implemented; roll back to the default HISTOGRAM",
                   core_type_str);
-//    core_ = MLP;
+//    core_ = MLMODEL;
     core_ = HISTOGRAM;
   } else {
     spdlog::error("conformal core {:s} is not recognized; roll back to the default HISTOGRAM",

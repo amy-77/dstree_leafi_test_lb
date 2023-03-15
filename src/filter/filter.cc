@@ -80,6 +80,7 @@ dstree::Filter::Filter(dstree::Config &config,
                        std::reference_wrapper<torch::Tensor> shared_train_queries) :
     config_(config),
     id_(id),
+    is_active_(false),
     shared_train_queries_(shared_train_queries),
     is_trained_(false),
     train_size_(0) {
@@ -92,11 +93,8 @@ dstree::Filter::Filter(dstree::Config &config,
     device_ = std::make_unique<torch::Device>(torch::kCPU);
   }
 
-  model_ = std::make_unique<dstree::MLP>(config.series_length_,
-                                         config.filter_dim_latent_,
-                                         config.filter_train_dropout_p_,
-                                         config.filter_leaky_relu_negative_slope_);
-  model_->to(*device_);
+  // delayed until allocated
+  model_ = nullptr;
 
   if (!config.to_load_index_) {
     bsf_distances_.reserve(config.filter_train_nexample_);
@@ -129,19 +127,28 @@ RESPONSE dstree::Filter::train() {
 //#endif
 #endif
 
+  if (is_active_ && model_ == nullptr) {
+    // TODO instantiate the model according to the assigned model_setting_
+    model_ = std::make_unique<dstree::MLPFilter>(config_.get().series_length_,
+                                                 config_.get().filter_dim_latent_,
+                                                 config_.get().filter_train_dropout_p_,
+                                                 config_.get().filter_leaky_relu_negative_slope_);
+    model_->to(*device_);
+  }
+
   ID_TYPE stream_id = -1;
   if (config_.get().filter_train_is_gpu_) {
     stream_id = at::cuda::getCurrentCUDAStream(config_.get().filter_device_id_).id(); // compiles with libtorch-gpu
   }
 
 #ifdef DEBUG
-  if (!node_lower_bound_distances_.empty()) {
+  if (!lb_distances_.empty()) {
     spdlog::debug("stream {:d} filter {:d} d_node_sq = {:s}",
-                  stream_id, id_, upcite::get_str(node_lower_bound_distances_.data(), train_size_));
+                  stream_id, id_, upcite::array2str(lb_distances_.data(), train_size_));
   }
 
   spdlog::debug("stream {:d} filter {:d} d_bsf_sq = {:s}",
-                stream_id, id_, upcite::get_str(bsf_distances_.data(), train_size_));
+                stream_id, id_, upcite::array2str(bsf_distances_.data(), train_size_));
 #endif
 
   if (config_.get().filter_remove_square_) {
@@ -153,7 +160,7 @@ RESPONSE dstree::Filter::train() {
 #ifdef DEBUG
   spdlog::debug("stream {:d} filter {:d} d_nn{:s} = {:s}",
                 stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
-                upcite::get_str(nn_distances_.data(), train_size_));
+                upcite::array2str(nn_distances_.data(), train_size_));
 #endif
 
   ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
@@ -375,9 +382,9 @@ RESPONSE dstree::Filter::train() {
 
 #ifdef DEBUG
   spdlog::debug("stream {:d} filter {:d} t_losses = {:s}",
-                stream_id, id_, upcite::get_str(train_losses.data(), config_.get().filter_train_nepoch_));
+                stream_id, id_, upcite::array2str(train_losses.data(), config_.get().filter_train_nepoch_));
   spdlog::debug("stream {:d} filter {:d} v_losses = {:s}",
-                stream_id, id_, upcite::get_str(valid_losses.data(), config_.get().filter_train_nepoch_));
+                stream_id, id_, upcite::array2str(valid_losses.data(), config_.get().filter_train_nepoch_));
 #endif
 
 #ifdef DEBUG
@@ -392,7 +399,7 @@ RESPONSE dstree::Filter::train() {
 
     spdlog::info("stream {:d} filter {:d} d_pred{:s} = {:s}",
                  stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
-                 upcite::get_str(prediction.accessor<VALUE_TYPE, 1>().data(), train_size_));
+                 upcite::array2str(prediction.accessor<VALUE_TYPE, 1>().data(), train_size_));
 
 #ifndef DEBUGGED
     spdlog::info("stream {:d} filter {:d} = {:b}, {:b}, {:b}",
@@ -526,6 +533,7 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
   std::string model_filepath = config_.get().dump_filters_folderpath_ + std::to_string(id_) +
       config_.get().model_dump_file_postfix_;
 
+  // TODO also dump the model setting
   torch::save(model_, model_filepath);
 
   return SUCCESS;
@@ -559,6 +567,14 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
     return FAILURE;
   }
 
+  // TODO also load the model setting
+  // TODO instantiate the model according to the setting
+  model_ = std::make_unique<dstree::MLPFilter>(config_.get().series_length_,
+                                               config_.get().filter_dim_latent_,
+                                               config_.get().filter_train_dropout_p_,
+                                               config_.get().filter_leaky_relu_negative_slope_);
+  model_->to(*device_);
+
   torch::load(model_, model_filepath);
   model_->eval();
 //  net->to(torch::Device(torch::kCPU));
@@ -567,4 +583,19 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   is_trained_ = true;
 
   return SUCCESS;
+}
+
+VALUE_TYPE dstree::Filter::get_external_pruning_frequency() const {
+  if (lb_distances_.empty() || lb_distances_.size() != bsf_distances_.size()) {
+    return 0;
+  }
+
+  ID_TYPE pruned_counter = 0;
+  for (ID_TYPE i = 0; i < lb_distances_.size(); ++i) {
+    if (lb_distances_[i] > bsf_distances_[i]) {
+      pruned_counter += 1;
+    }
+  }
+
+  return static_cast<VALUE_TYPE>(pruned_counter) / static_cast<VALUE_TYPE>(lb_distances_.size());
 }

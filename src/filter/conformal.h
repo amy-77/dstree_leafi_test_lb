@@ -16,7 +16,7 @@ namespace upcite {
 
 enum CONFORMAL_CORE {
   HISTOGRAM = 0,
-  MLP = 1
+  MLMODEL = 1
 };
 
 class ConformalPredictor {

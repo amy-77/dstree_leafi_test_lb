@@ -60,17 +60,30 @@ class Node {
     return eapca_envelope_->cal_lower_bound_EDsquare(series_ptr);
   }
 
-  bool has_filter() const { return neurofilter_ != nullptr; }
-  Filter &get_filter() const { return *neurofilter_; }
-  VALUE_TYPE filter_infer(torch::Tensor &query_series) const { return neurofilter_->infer(query_series); }
+  bool has_filter() const { return filter_ != nullptr; }
+  bool has_active_filter() const { return filter_ != nullptr && filter_->is_active(); }
+  Filter &get_filter() const { return *filter_; }
+  VALUE_TYPE filter_infer(torch::Tensor &query_series) const { return filter_->infer(query_series); }
+
+  VALUE_TYPE get_envelop_pruning_frequency() const {
+    return filter_.get()->get_external_pruning_frequency();
+  };
 
   RESPONSE implant_filter(ID_TYPE id, std::reference_wrapper<torch::Tensor> shared_train_queries) {
-    neurofilter_ = std::make_unique<dstree::Filter>(config_, id, shared_train_queries);
+    filter_ = std::make_unique<dstree::Filter>(config_, id, shared_train_queries);
     return SUCCESS;
   }
 
-  RESPONSE push_filter_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance) {
-    return neurofilter_->push_example(bsf_distance, nn_distance);
+  RESPONSE activate_filter(const MODEL_SETTING &model_setting) {
+    if (filter_ != nullptr) {
+      return filter_->activate(model_setting);
+    } else {
+      return FAILURE;
+    }
+  }
+
+  RESPONSE push_filter_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance, VALUE_TYPE lb_distance) {
+    return filter_->push_example(bsf_distance, nn_distance, lb_distance);
   }
 
   std::vector<std::reference_wrapper<Node>>::iterator begin() {
@@ -119,7 +132,7 @@ class Node {
   std::vector<std::unique_ptr<Node>> children_;
   std::vector<std::reference_wrapper<Node>> children_refs_; // for iterator only
 
-  std::unique_ptr<Filter> neurofilter_;
+  std::unique_ptr<Filter> filter_;
 };
 
 }

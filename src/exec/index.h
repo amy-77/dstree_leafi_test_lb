@@ -17,6 +17,7 @@
 #include "buffer.h"
 #include "node.h"
 #include "filter.h"
+#include "allocator.h"
 
 namespace upcite {
 namespace dstree {
@@ -32,11 +33,10 @@ class Compare {
 
 class Index {
  public:
-  Index(Config &config);
+  explicit Index(Config &config);
   ~Index();
 
   RESPONSE build();
-  RESPONSE train();
 
   RESPONSE dump() const;
   RESPONSE load();
@@ -47,10 +47,18 @@ class Index {
  private:
   RESPONSE insert(ID_TYPE batch_series_id);
 
+  RESPONSE train();
+
+  // initialize filter's member variables except the model
   RESPONSE filter_initialize(dstree::Node &node,
                              ID_TYPE *filter_id);
+
   RESPONSE filter_collect();
   RESPONSE filter_collect_mthread();
+
+  // assign model settings to filters and initialize their model variable
+  RESPONSE filter_allocate();
+
   RESPONSE filter_train();
   RESPONSE filter_train_mthread();
 
@@ -61,6 +69,8 @@ class Index {
   std::unique_ptr<Node> root_;
   ID_TYPE nnode_, nleaf_;
   std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare> leaf_min_heap_;
+
+  std::unique_ptr<Allocator> allocator_;
 
   VALUE_TYPE *filter_train_query_ptr_;
   torch::Tensor filter_train_query_tsr_;

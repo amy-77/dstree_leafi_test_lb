@@ -81,7 +81,11 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_conformal_core_type_("histogram"),
     filter_conformal_confidence_(-1),
     filter_conformal_default_confidence_(0.95),
-    filter_conformal_train_val_split_(0.9) {
+    filter_conformal_train_val_split_(0.9),
+    filter_max_gpu_memory_mb_(constant::MAX_VALUE),
+    filter_model_setting_str_(""),
+    filter_candidate_settings_filepath_(""),
+    filter_allocate_is_gain_(false) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -192,7 +196,15 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Filter conformal confidence level ([0, 1])")
       ("filter_conformal_train_val_split",
        po::value<VALUE_TYPE>(&filter_conformal_train_val_split_)->default_value(0.9),
-       "Filter conformal train/val split ratio");
+       "Filter conformal train/val split ratio")
+      ("filter_max_gpu_memory_mb", po::value<VALUE_TYPE>(&filter_max_gpu_memory_mb_)->default_value(constant::MAX_VALUE),
+       "Filter max gpu memory to be used")
+      ("filter_model_setting", po::value<std::string>(&filter_model_setting_str_),
+       "Filter model setting string")
+      ("filter_candidate_settings_filepath", po::value<std::string>(&filter_candidate_settings_filepath_),
+       "Filter model candidate model setting filepath")
+      ("filter_allocate_is_gain", po::bool_switch(&filter_allocate_is_gain_)->default_value(false),
+       "Whether to allocate filters based on the expected runtime gain (default: false, i.e., by size)");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -266,6 +278,13 @@ dstree::Config::Config(int argc, char *argv[]) :
 
         filter_conformal_confidence_ = filter_conformal_default_confidence_;
       }
+    }
+
+    if (filter_model_setting_str_.empty() && filter_candidate_settings_filepath_.empty()) {
+      std::cout
+          << "Please specify model settings by setting --filter_model_setting or --filter_candidate_settings_filepath"
+          << std::endl;
+      exit(-1);
     }
   }
 
@@ -439,4 +458,9 @@ void dstree::Config::log() {
   spdlog::info("filter_conformal_confidence = {:.3f}", filter_conformal_confidence_);
   spdlog::info("filter_conformal_default_confidence = {:.3f}", filter_conformal_default_confidence_);
   spdlog::info("filter_conformal_train_val_split = {:.3f}", filter_conformal_train_val_split_);
+
+  spdlog::info("filter_max_gpu_memory_mb = {:.1f}", filter_max_gpu_memory_mb_);
+  spdlog::info("filter_model_setting_str = {:s}", filter_model_setting_str_);
+  spdlog::info("filter_candidate_settings_filepath = {:s}", filter_candidate_settings_filepath_);
+  spdlog::info("filter_allocate_is_gain = {:b}", filter_allocate_is_gain_);
 }

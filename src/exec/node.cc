@@ -29,7 +29,7 @@ dstree::Node::Node(dstree::Config &config,
     id_(id),
     buffer_(buffer_manager.create_node_buffer(id)),
     nseries_(0),
-    neurofilter_(nullptr) {
+    filter_(nullptr) {
   ;
   split_ = std::make_unique<dstree::Split>();
   children_.reserve(config.node_nchild_);
@@ -47,7 +47,7 @@ dstree::Node::Node(dstree::Config &config,
     id_(id),
     buffer_(buffer_manager.create_node_buffer(id)),
     nseries_(0),
-    neurofilter_(nullptr) {
+    filter_(nullptr) {
   split_ = std::make_unique<dstree::Split>();
   children_.reserve(config.node_nchild_);
 
@@ -706,15 +706,15 @@ RESPONSE dstree::Node::dump(void *ofs_buf) const {
     split_->dump(node_ofs, ofs_buf);
   }
 
-  if (neurofilter_ != nullptr) {
-    ofs_id_buf[0] = neurofilter_.get()->get_id();
+  if (filter_ != nullptr) {
+    ofs_id_buf[0] = filter_.get()->get_id();
   } else {
     ofs_id_buf[0] = -1;
   }
   node_ofs.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
 
-  if (neurofilter_ != nullptr) {
-    neurofilter_->dump(node_ofs);
+  if (filter_ != nullptr) {
+    filter_->dump(node_ofs);
   }
 
   if (buffer_.get().size() > 0) {
@@ -798,8 +798,8 @@ RESPONSE dstree::Node::load(void *ifs_buf,
   ID_TYPE filter_id = ifs_id_buf[0];
 
   if (filter_id >= 0) {
-    neurofilter_ = std::make_unique<dstree::Filter>(config_, filter_id, constant::TENSOR_PLACEHOLDER_REF);
-    status = neurofilter_->load(node_ifs, ifs_buf);
+    filter_ = std::make_unique<dstree::Filter>(config_, filter_id, constant::TENSOR_PLACEHOLDER_REF);
+    status = filter_->load(node_ifs, ifs_buf);
 
     if (status == FAILURE) {
       spdlog::error("node {:d} neurofilter loading failed", id_);

@@ -10,6 +10,7 @@
 #include <functional>
 
 #include <torch/torch.h>
+#include <spdlog/spdlog.h>
 
 #include "global.h"
 #include "config.h"
@@ -26,14 +27,24 @@ class Filter {
          std::reference_wrapper<torch::Tensor> shared_train_queries);
   ~Filter() = default;
 
-  RESPONSE push_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance) {
+  RESPONSE push_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance, VALUE_TYPE lb_distance) {
     bsf_distances_.push_back(bsf_distance);
     nn_distances_.push_back(nn_distance);
+
+    lb_distances_.push_back(lb_distance);
 
     train_size_ += 1;
 
     return SUCCESS;
   };
+
+  bool is_active() const { return is_active_; }
+  RESPONSE activate(const MODEL_SETTING &model_setting) {
+    model_setting_ = model_setting;
+    is_active_ = true;
+
+    return SUCCESS;
+  }
 
   RESPONSE train();
   VALUE_TYPE infer(torch::Tensor &query_series) const;
@@ -42,17 +53,21 @@ class Filter {
   RESPONSE load(std::ifstream &node_ifs, void *ifs_buf);
 
   ID_TYPE get_id() const { return id_; };
+  VALUE_TYPE get_external_pruning_frequency() const;
 
  private:
-  ID_TYPE id_;
-
   std::reference_wrapper<dstree::Config> config_;
 
-//  std::unique_ptr<FilterModel> model_;
+  ID_TYPE id_;
+
+  bool is_active_;
+  MODEL_SETTING model_setting_;
   std::shared_ptr<FilterModel> model_; // torch::save only takes shared_ptr
   std::unique_ptr<ConformalRegressor> conformal_predictor_;
 
-  std::unique_ptr<torch::Device> device_; // TODO ref?
+  // TODO ref?
+  // TODO support different device for training and inference
+  std::unique_ptr<torch::Device> device_;
 
   bool is_trained_;
   ID_TYPE train_size_;
@@ -61,10 +76,8 @@ class Filter {
   std::vector<VALUE_TYPE> bsf_distances_;
   std::vector<VALUE_TYPE> nn_distances_;
 
-  std::vector<VALUE_TYPE> node_lower_bound_distances_;
+  std::vector<VALUE_TYPE> lb_distances_;
 //  std::vector<VALUE_TYPE> node_upper_bound_distances_;
-
-//  std::unique_ptr<at::cuda::CUDAStream> stream_;
 };
 
 }

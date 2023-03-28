@@ -25,6 +25,8 @@ class ConformalPredictor {
   ~ConformalPredictor() = default;
 
   VALUE_TYPE get_alpha(VALUE_TYPE confidence) const;
+  VALUE_TYPE get_alpha_by_pos(ID_TYPE pos) const;
+  RESPONSE set_alpha_by_pos(ID_TYPE pos);
 
   RESPONSE dump(std::ofstream &node_fos) const;
   RESPONSE load(std::ifstream &node_ifs, void *ifs_buf);

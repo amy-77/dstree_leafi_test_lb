@@ -64,7 +64,7 @@ std::vector<upcite::INTERVAL> upcite::ConformalRegressor::predict(std::vector<VA
                                                                   VALUE_TYPE confidence,
                                                                   VALUE_TYPE y_max,
                                                                   VALUE_TYPE y_min) {
-  if (confidence >= 0 && !upcite::is_equal(confidence_, confidence)) {
+  if (confidence >= 0 && confidence <= 1 && !upcite::is_equal(confidence_, confidence)) {
     confidence_id_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence);
     alpha_ = alphas_[confidence_id_];
     confidence_ = confidence;
@@ -125,3 +125,19 @@ VALUE_TYPE upcite::ConformalPredictor::get_alpha(VALUE_TYPE confidence) const {
   return constant::MAX_VALUE;
 }
 
+VALUE_TYPE upcite::ConformalPredictor::get_alpha_by_pos(ID_TYPE pos) const {
+  if (pos >= 0 && pos <= alphas_.size()) {
+    return alphas_[pos];
+  }
+
+  return constant::MAX_VALUE;
+}
+
+RESPONSE upcite::ConformalPredictor::set_alpha_by_pos(ID_TYPE pos) {
+  if (pos >= 0 && pos <= alphas_.size()) {
+    alpha_ = alphas_[pos];
+    return SUCCESS;
+  }
+
+  return FAILURE;
+}

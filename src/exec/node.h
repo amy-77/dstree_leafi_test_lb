@@ -62,8 +62,17 @@ class Node {
 
   bool has_filter() const { return filter_ != nullptr; }
   bool has_active_filter() const { return filter_ != nullptr && filter_->is_active(); }
-  Filter &get_filter() const { return *filter_; }
+  std::reference_wrapper<Filter> get_filter() const { return std::ref(*filter_); }
   VALUE_TYPE filter_infer(torch::Tensor &query_series) const { return filter_->infer(query_series); }
+  VALUE_TYPE get_filter_nn_distance(ID_TYPE pos) const { return filter_->get_nn_distance(pos); };
+  VALUE_TYPE get_filter_bsf_distance(ID_TYPE pos) const { return filter_->get_bsf_distance(pos); };
+  VALUE_TYPE get_filter_pred_distance(ID_TYPE pos) const { return filter_->get_pred_distance(pos); };
+  VALUE_TYPE get_filter_confidence_half_interval_by_pos(ID_TYPE pos) const {
+    return filter_->get_confidence_half_interval_by_pos(pos);
+  };
+  RESPONSE set_filter_confidence_half_interval_by_pos(ID_TYPE pos) {
+    return filter_->set_confidence_half_interval_by_pos(pos);
+  };
 
   VALUE_TYPE get_envelop_pruning_frequency() const {
     return filter_.get()->get_external_pruning_frequency();

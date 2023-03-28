@@ -505,6 +505,7 @@ struct TrainCache {
 
   at::cuda::CUDAStream stream_;
 
+  // TODO remove ref to filter; use node instead
   std::stack<std::reference_wrapper<dstree::Filter>> &filter_cache_;
   pthread_mutex_t *filter_cache_mutex_;
 };
@@ -699,7 +700,6 @@ RESPONSE dstree::Index::train() {
 
   //
   // initialize filters
-  //
   ID_TYPE filter_id = 0;
   filter_initialize(*root_, &filter_id);
 
@@ -707,7 +707,6 @@ RESPONSE dstree::Index::train() {
 
   //
   // collect filter training data, i.e., the bsf distances, nn distances, low-bound distances
-  //
   if (config_.get().filter_train_is_mthread_) {
     filter_collect_mthread();
   } else {
@@ -716,7 +715,6 @@ RESPONSE dstree::Index::train() {
 
   //
   // allocate filters among nodes (and activate them)
-  //
   filter_allocate();
 
   // train all filter model
@@ -724,6 +722,12 @@ RESPONSE dstree::Index::train() {
     filter_train_mthread();
   } else {
     filter_train();
+  }
+
+  //
+  // get confidence intervals based on the required recall
+  if (config_.get().filter_is_conformal_ && config_.get().filter_conformal_adjust_confidence_by_recall_) {
+    allocator_.get()->set_confidence_from_recall();
   }
 
   // support difference devices for training and inference
@@ -898,13 +902,13 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
                 VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
                 spdlog::debug("query {:d} node_id {:d} d_pred_sq {:.3f} bsf {:.3f}",
                               answer->query_id_,
                               node_to_visit.get().get_id(),
                               predicted_nn_distance,
                               answer->get_bsf());
-//#endif
+#endif
 #endif
 
                 if (predicted_nn_distance > answer->get_bsf()) {

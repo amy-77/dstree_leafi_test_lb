@@ -64,6 +64,8 @@ class Allocator {
   // ideally one filter with a slower but more accurate model might be replaced by two filters with faster but less accurate models
   RESPONSE assign();
 
+  RESPONSE set_confidence_from_recall();
+
  private:
   RESPONSE evaluate();
 

@@ -57,24 +57,6 @@ class TORCH_API SeriesDataset
   torch::Tensor series_, targets_;
 };
 
-void adjust_learning_rate(torch::optim::SGD &optimizer,
-                          VALUE_TYPE max_lr,
-                          VALUE_TYPE min_lr,
-                          ID_TYPE epoch,
-                          ID_TYPE max_epoch) {
-//    float new_lr = max_lr - (max_lr - min_lr) * ((float) epoch / (float) max_epoch);
-
-  float boundary = 9;
-  float current_step = (epoch / max_epoch - 0.5f) * boundary;
-  float new_lr = min_lr + (max_lr - min_lr) / (1 + exp(current_step));
-
-  for (auto &group : optimizer.param_groups()) {
-    if (group.has_options()) {
-      group.options().set_lr(new_lr);
-    }
-  }
-}
-
 dstree::Filter::Filter(dstree::Config &config,
                        ID_TYPE id,
                        std::reference_wrapper<torch::Tensor> shared_train_queries) :
@@ -141,24 +123,31 @@ RESPONSE dstree::Filter::train() {
     stream_id = at::cuda::getCurrentCUDAStream(config_.get().filter_device_id_).id(); // compiles with libtorch-gpu
   }
 
-#ifdef DEBUG
-  if (!lb_distances_.empty()) {
-    spdlog::debug("stream {:d} filter {:d} d_node_sq = {:s}",
-                  stream_id, id_, upcite::array2str(lb_distances_.data(), train_size_));
-  }
-
-  spdlog::debug("stream {:d} filter {:d} d_bsf_sq = {:s}",
-                stream_id, id_, upcite::array2str(bsf_distances_.data(), train_size_));
-#endif
-
   if (config_.get().filter_remove_square_) {
     for (ID_TYPE i = 0; i < train_size_; ++i) {
       nn_distances_[i] = sqrt(nn_distances_[i]);
+      bsf_distances_[i] = sqrt(bsf_distances_[i]);
+    }
+
+    if (!lb_distances_.empty()) {
+      for (ID_TYPE i = 0; i < train_size_; ++i) {
+        lb_distances_[i] = sqrt(lb_distances_[i]);
+      }
     }
   }
 
 #ifdef DEBUG
-  spdlog::debug("stream {:d} filter {:d} d_nn{:s} = {:s}",
+  if (!lb_distances_.empty()) {
+    spdlog::debug("filter {:d} stream {:d} d_node{:s} = {:s}",
+                  stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
+                  upcite::array2str(lb_distances_.data(), train_size_));
+  }
+
+  spdlog::debug("filter {:d} stream {:d} d_bsf{:s} = {:s}",
+                stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
+                upcite::array2str(bsf_distances_.data(), train_size_));
+
+  spdlog::debug("filter {:d} stream {:d} d_nn{:s} = {:s}",
                 stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
                 upcite::array2str(nn_distances_.data(), train_size_));
 #endif
@@ -180,36 +169,6 @@ RESPONSE dstree::Filter::train() {
   auto valid_data_loader = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
       valid_dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-  auto all_data = shared_train_queries_.get().clone();
-  auto all_dataset = SeriesDataset(all_data, nn_distances_, train_size_, *device_);
-  auto all_data_loader = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
-      all_dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
-
-#ifndef DEBUGGED
-  spdlog::info("stream {:d} filter {:d} v shape = {:s}; {:s}",
-               stream_id, id_,
-               upcite::get_str(valid_data.sizes().data(), valid_data.sizes().size()),
-               upcite::get_str(valid_target.sizes().data(), valid_target.sizes().size()));
-#endif
-  auto last_query_cpu = train_data.index({num_train_examples - 1}).cpu().contiguous();
-  spdlog::info("stream {:d} filter {:d} tq[-1] {:b} = {:s}",
-               stream_id, id_, last_query_cpu.requires_grad(),
-               upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)));
-
-  last_query_cpu = valid_data.index({num_valid_examples - 1}).cpu().contiguous();
-  spdlog::info("stream {:d} filter {:d} vq[-1] {:b} = {:s}",
-               stream_id, id_, last_query_cpu.requires_grad(),
-               upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)));
-
-  last_query_cpu = all_data.index({train_size_ - 1}).cpu().contiguous();
-  spdlog::info("stream {:d} filter {:d} eq[-1] {:b} = {:s}",
-               stream_id, id_, last_query_cpu.requires_grad(),
-               upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)));
-#endif
-#endif
-
   torch::optim::SGD optimizer(model_->parameters(), config_.get().filter_train_learning_rate_);
   upcite::optim::ReduceLROnPlateau lr_scheduler = upcite::optim::ReduceLROnPlateau(optimizer);
 
@@ -217,23 +176,15 @@ RESPONSE dstree::Filter::train() {
   torch::nn::MSELoss mse_loss(torch::nn::MSELossOptions().reduction(torch::kMean));
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
   std::vector<float> train_losses, valid_losses, batch_train_losses;
   train_losses.reserve(config_.get().filter_train_nepoch_);
   batch_train_losses.reserve(num_train_examples / config_.get().filter_train_batchsize_ + 1);
 
   valid_losses.reserve(config_.get().filter_train_nepoch_);
-//#endif
 #endif
 
   torch::Tensor batch_data, batch_target;
   for (ID_TYPE epoch = 0; epoch < config_.get().filter_train_nepoch_; ++epoch) {
-#ifdef DEBUG
-#ifndef DEBUGGED
-    bool is_train_logged = false;
-#endif
-#endif
-
     model_->train();
 
     for (auto &batch : *train_data_loader) {
@@ -257,47 +208,13 @@ RESPONSE dstree::Filter::train() {
 
 #ifdef DEBUG
       batch_train_losses.push_back(loss.detach().item<float>());
-
-#ifndef DEBUGGED
-      if (!is_train_logged && ((epoch < 100 && epoch % 10 == 0) || (epoch >= 100 && epoch % 100 == 0))) {
-        auto target_cpu = batch_target.detach().cpu().contiguous();
-        spdlog::info("stream {:d} filter {:d} t{:d} b0 d_nn{:s} = {:s}",
-                     stream_id, id_, epoch, config_.get().filter_remove_square_ ? "" : "_sq",
-                     upcite::get_str(target_cpu.data_ptr<VALUE_TYPE>(), target_cpu.size(0)));
-
-        auto pred_cpu = prediction.detach().cpu().contiguous();
-        spdlog::info("stream {:d} filter {:d} t{:d} b0 d_pred{:s} = {:s}",
-                     stream_id, id_, epoch, config_.get().filter_remove_square_ ? "" : "_sq",
-                     upcite::get_str(pred_cpu.data_ptr<VALUE_TYPE>(), pred_cpu.size(0)));
-
-        auto last_query_cpu = batch_data.index({batch_data.size(0) - 1}).cpu().contiguous();
-        spdlog::info("stream {:d} filter {:d} t{:d} b0 q[-1] {:b} = {:s}",
-                     stream_id, id_, epoch, batch_data.requires_grad(),
-                     upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)));
-
-#ifndef DEBUGGED
-        spdlog::info("stream {:d} filter {:d} t{:d} b0 shape = {:s}; {:s}",
-                     stream_id, id_, epoch,
-                     upcite::get_str(batch_data.sizes().data(), batch_data.sizes().size()),
-                     upcite::get_str(batch_target.sizes().data(), batch_target.sizes().size()));
-
-        spdlog::info("stream {:d} filter {:d} t{:d} = {:b}, {:b}, {:b}",
-                     stream_id, id_, epoch,
-                     model_->fc1_->is_training(), model_->fc3_->is_training(), model_->activate_->is_training());
-#endif
-
-        is_train_logged = true;
-      }
-#endif
 #endif
     }
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
     train_losses.push_back(std::accumulate(batch_train_losses.begin(), batch_train_losses.end(), 0.0)
                                / static_cast<VALUE_TYPE>(batch_train_losses.size()));
     batch_train_losses.clear();
-//#endif
 #endif
 
     VALUE_TYPE valid_loss = 0;
@@ -314,164 +231,72 @@ RESPONSE dstree::Filter::train() {
 
 #ifdef DEBUG
       valid_losses.push_back(valid_loss);
-
-#ifndef DEBUGGED
-      if ((epoch < 100 && epoch % 10 == 0) || (epoch >= 100 && epoch % 100 == 0)) {
-#ifndef DEBUGGED
-        spdlog::info("stream {:d} filter {:d} v{:d} = {:b}, {:b}, {:b}",
-                     stream_id, id_, epoch,
-                     model_->fc1_->is_training(), model_->fc3_->is_training(), model_->activate_->is_training());
-#endif
-
-        auto pred_cpu = prediction.detach().cpu().contiguous();
-        spdlog::info("stream {:d} filter {:d} v{:d} d_pred{:s} = {:s}",
-                     stream_id, id_, epoch, config_.get().filter_remove_square_ ? "" : "_sq",
-                     upcite::get_str(pred_cpu.data_ptr<VALUE_TYPE>(), pred_cpu.size(0)));
-
-        auto last_query_cpu = valid_data.index({num_valid_examples - 1}).cpu().contiguous();
-        spdlog::info("stream {:d} filter {:d} v{:d} q[-1] {:b} = {:s}",
-                     stream_id, id_, epoch, valid_data.requires_grad(),
-                     upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)));
-      }
-#endif
 #endif
     }
-
-    lr_scheduler.check_step(valid_loss);
-    // TODO refactor to SigmoidLR
-//    adjust_learning_rate(optimizer,
-//                         config_.get().filter_train_learning_rate_,
-//                         config_.get().filter_train_min_lr_,
-//                         epoch,
-//                         config_.get().filter_train_nepoch_);
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-    if ((epoch < 100 && epoch % 10 == 0) || (epoch >= 100 && epoch % 100 == 0)) {
-//      torch::NoGradGuard no_grad;
-      c10::InferenceMode guard;
-      model_->eval();
-
-      torch::Tensor pred_cpu;
-
-//      pred_cpu = model_->forward(all_data).detach().cpu().contiguous();
-
-      for (auto &batch : *all_data_loader) { // only one batch
-        batch_data = batch.data;
-        pred_cpu = model_->forward(batch_data).detach().cpu().contiguous();
-      }
-
-      spdlog::info("stream {:d} filter {:d} e{:d} d_pred{:s} = {:s}",
-                   stream_id, id_, epoch, config_.get().filter_remove_square_ ? "" : "_sq",
-                   upcite::get_str(pred_cpu.data_ptr<VALUE_TYPE>(), pred_cpu.size(0)));
-
-      auto last_query_cpu = batch_data.index({train_size_ - 1}).cpu().contiguous();
-      spdlog::info("stream {:d} filter {:d} e{:d} q[-1] {:b} = {:s}",
-                   stream_id, id_, epoch, batch_data.requires_grad(),
-                   upcite::get_str(last_query_cpu.data_ptr<VALUE_TYPE>(), last_query_cpu.size(0)));
-
-#ifndef DEBUGGED
-      spdlog::info("stream {:d} filter {:d} e{:d} = {:b}, {:b}, {:b}",
-                   stream_id, id_, epoch,
-                   model_->fc1_->is_training(), model_->fc3_->is_training(), model_->activate_->is_training());
-#endif
-    };
-#endif
-#endif
   }
 
 #ifdef DEBUG
-  spdlog::debug("stream {:d} filter {:d} t_losses = {:s}",
+  spdlog::debug("filter {:d} stream {:d} t_losses = {:s}",
                 stream_id, id_, upcite::array2str(train_losses.data(), config_.get().filter_train_nepoch_));
-  spdlog::debug("stream {:d} filter {:d} v_losses = {:s}",
+  spdlog::debug("filter {:d} stream {:d} v_losses = {:s}",
                 stream_id, id_, upcite::array2str(valid_losses.data(), config_.get().filter_train_nepoch_));
 #endif
 
-#ifdef DEBUG
-//#ifndef DEBUGGED
-  {
 //    torch::NoGradGuard no_grad;
     c10::InferenceMode guard;
     model_->eval();
 
-//    auto prediction = model_->forward(all_data).detach().cpu();
     auto prediction = model_->forward(shared_train_queries_).detach().cpu();
-
-    spdlog::info("stream {:d} filter {:d} d_pred{:s} = {:s}",
-                 stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
-                 upcite::array2str(prediction.accessor<VALUE_TYPE, 1>().data(), train_size_));
-
-#ifndef DEBUGGED
-    spdlog::info("stream {:d} filter {:d} = {:b}, {:b}, {:b}",
-                 stream_id, id_,
-                 model_->fc1_->is_training(), model_->fc3_->is_training(), model_->activate_->is_training());
-#endif
-  };
-//#endif
-#endif
-
-  if (config_.get().filter_is_conformal_) {
-    c10::InferenceMode guard;
-    model_->eval();
-
-    torch::Tensor prediction = model_->forward(valid_data);
     VALUE_TYPE *predictions_array = prediction.detach().cpu().contiguous().data_ptr<VALUE_TYPE>();
 
-    ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
-    auto residuals = upcite::make_reserved<VALUE_TYPE>(num_conformal_examples);
-
-    for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
-      // TODO torch::Tensor to ptr is not stable
-      if (predictions_array[i] > constant::MIN_VALUE && predictions_array[i] < constant::MAX_VALUE &&
-          !upcite::equals_zero(predictions_array[i])) {
-#ifdef DEBUG
-#ifndef DEBUGGED
-        spdlog::info("stream {:d} filter {:d} conformal train target {:d} = {:f}",
-                     stream_id, id_, i, nn_distances_[num_train_examples + i]);
-        spdlog::info("stream {:d} filter {:d} conformal train prediction {:d} = {:f}",
-                     stream_id, id_, i, predictions_array[i]);
-#endif
-#endif
-
-        residuals.emplace_back(predictions_array[i] - nn_distances_[num_train_examples + i]);
-      }
-    }
-
-    conformal_predictor_->fit(residuals);
+    pred_distances_.insert(pred_distances_.end(), predictions_array, predictions_array + train_size_);
 
 #ifdef DEBUG
-    spdlog::info(
-        "stream {:d} filter {:d} conformal confidence (one side-)interval {:.3f}@0.50, {:.3f}@0.90, {:.3f}@0.95, {:.3f}@0.99",
-        stream_id,
-        id_,
-        conformal_predictor_->get_alpha(0.5),
-        conformal_predictor_->get_alpha(0.9),
-        conformal_predictor_->get_alpha(0.95),
-        conformal_predictor_->get_alpha(0.99));
-
-    if (!upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.5)) &&
-        !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.9)) &&
-        !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.95)) &&
-        !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.99))) {
-      spdlog::info("stream {:d} filter {:d} conformal confidence (one side-)interval {:.3f}@{:.3f}",
-                   stream_id,
-                   id_,
-                   conformal_predictor_->get_alpha(config_.get().filter_conformal_confidence_),
-                   config_.get().filter_conformal_confidence_);
-    }
-
-#ifndef DEBUGGED
-    // TODO not necessary for global symmetrical confidence intervals
-    auto y_hat = upcite::make_reserved<VALUE_TYPE>(num_valid_examples - num_conformal_examples);
-    y_hat.assign(predictions_array + num_conformal_examples, predictions_array + num_valid_examples);
-    std::vector<INTERVAL> y_intervals = conformal_predictor_->predict(y_hat);
-
-    spdlog::info("stream {:d} filter {:d} d_interval{:s} eval = {:s}",
+    spdlog::info("filter {:d} stream {:d} d_pred{:s} = {:s}",
                  stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
-                 upcite::get_str(y_intervals.data(), y_intervals.size()));
+                 upcite::array2str(predictions_array, train_size_));
+#endif
+
+    if (config_.get().filter_is_conformal_) {
+      ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+      auto residuals = upcite::make_reserved<VALUE_TYPE>(num_conformal_examples);
+
+      for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
+        // TODO torch::Tensor to ptr is not stable
+        if (predictions_array[num_train_examples + i] > constant::MIN_VALUE &&
+            predictions_array[num_train_examples + i] < constant::MAX_VALUE &&
+            !upcite::equals_zero(predictions_array[num_train_examples + i])) {
+          // TODO not necessary for global symmetrical confidence intervals
+          residuals.emplace_back(predictions_array[num_train_examples + i] - nn_distances_[num_train_examples + i]);
+        }
+      }
+
+      conformal_predictor_->fit(residuals);
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+      spdlog::info(
+          "filter {:d} stream {:d} conformal confidence (one side-)interval {:.3f}@0.50, {:.3f}@0.90, {:.3f}@0.95, {:.3f}@0.99",
+          stream_id,
+          id_,
+          conformal_predictor_->get_alpha(0.5),
+          conformal_predictor_->get_alpha(0.9),
+          conformal_predictor_->get_alpha(0.95),
+          conformal_predictor_->get_alpha(0.99));
+
+      if (!upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.5)) &&
+          !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.9)) &&
+          !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.95)) &&
+          !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.99))) {
+        spdlog::info("filter {:d} stream {:d} conformal confidence (one side-)interval {:.3f}@{:.3f}",
+                     stream_id,
+                     id_,
+                     conformal_predictor_->get_alpha(config_.get().filter_conformal_confidence_),
+                     config_.get().filter_conformal_confidence_);
+      }
 #endif
 #endif
-  }
+    }
 
 #ifdef DEBUG
   if (torch::cuda::is_available() && id_ == 0) {
@@ -485,19 +310,14 @@ RESPONSE dstree::Filter::train() {
       memory_size += buffer.nbytes();
     }
 
-    spdlog::info("filter {:d} size = {:.3f}MB", id_, (static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024)));
+    spdlog::info("filter {:d} gpu mem = {:.3f}MB", id_, (static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024)));
   }
 #endif
 
-//  for (const auto &parameter : model_->parameters()) {
-//    parameter.requires_grad_(false);
-//  }
-  model_->eval();
 //  net->to(torch::Device(torch::kCPU));
-
   c10::cuda::CUDACachingAllocator::emptyCache();
-  is_trained_ = true;
 
+  is_trained_ = true;
   return SUCCESS;
 }
 

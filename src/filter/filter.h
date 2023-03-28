@@ -54,6 +54,16 @@ class Filter {
 
   ID_TYPE get_id() const { return id_; };
   VALUE_TYPE get_external_pruning_frequency() const;
+  VALUE_TYPE get_nn_distance(ID_TYPE pos) const { return nn_distances_[pos]; };
+  VALUE_TYPE get_bsf_distance(ID_TYPE pos) const { return bsf_distances_[pos]; };
+  VALUE_TYPE get_pred_distance(ID_TYPE pos) const { return pred_distances_[pos]; };
+  VALUE_TYPE get_confidence_half_interval_by_pos(ID_TYPE pos) const {
+    return conformal_predictor_.get()->get_alpha_by_pos(pos);
+  };
+  RESPONSE set_confidence_half_interval_by_pos(ID_TYPE pos) {
+    conformal_predictor_.get()->set_alpha_by_pos(pos);
+    return SUCCESS;
+  };
 
  private:
   std::reference_wrapper<dstree::Config> config_;
@@ -78,6 +88,8 @@ class Filter {
 
   std::vector<VALUE_TYPE> lb_distances_;
 //  std::vector<VALUE_TYPE> node_upper_bound_distances_;
+
+  std::vector<VALUE_TYPE> pred_distances_;
 };
 
 }

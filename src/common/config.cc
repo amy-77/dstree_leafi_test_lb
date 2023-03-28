@@ -85,7 +85,9 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_max_gpu_memory_mb_(constant::MAX_VALUE),
     filter_model_setting_str_(""),
     filter_candidate_settings_filepath_(""),
-    filter_allocate_is_gain_(false) {
+    filter_allocate_is_gain_(false),
+    filter_conformal_recall_(-1) ,
+    filter_conformal_adjust_confidence_by_recall_(false) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -204,7 +206,9 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("filter_candidate_settings_filepath", po::value<std::string>(&filter_candidate_settings_filepath_),
        "Filter model candidate model setting filepath")
       ("filter_allocate_is_gain", po::bool_switch(&filter_allocate_is_gain_)->default_value(false),
-       "Whether to allocate filters based on the expected runtime gain (default: false, i.e., by size)");
+       "Whether to allocate filters based on the expected runtime gain (default: false, i.e., by size)")
+      ("filter_conformal_recall", po::value<VALUE_TYPE>(&filter_conformal_recall_)->default_value(-1),
+       "Filter conformal recall level ([0, 1])");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -269,7 +273,9 @@ dstree::Config::Config(int argc, char *argv[]) :
     }
 
     if (filter_is_conformal_) {
-      if (filter_conformal_confidence_ < 0 || filter_conformal_confidence_ > 1) {
+      if (filter_conformal_recall_ >= 0 && filter_conformal_recall_ <= 1) {
+        filter_conformal_adjust_confidence_by_recall_ = true;
+      } else if (filter_conformal_confidence_ < 0 || filter_conformal_confidence_ > 1) {
         if (!upcite::is_equal(filter_conformal_confidence_, static_cast<VALUE_TYPE>(-1))) {
           std::cout << "Filter conformal confidence level " << filter_conformal_confidence_
                     << " is invalid; revert to default (" << filter_conformal_default_confidence_ << ")"
@@ -463,4 +469,7 @@ void dstree::Config::log() {
   spdlog::info("filter_model_setting_str = {:s}", filter_model_setting_str_);
   spdlog::info("filter_candidate_settings_filepath = {:s}", filter_candidate_settings_filepath_);
   spdlog::info("filter_allocate_is_gain = {:b}", filter_allocate_is_gain_);
+
+  spdlog::info("filter_conformal_adjust_confidence_by_recall = {:b}", filter_conformal_adjust_confidence_by_recall_);
+  spdlog::info("filter_conformal_recall = {:.2f}", filter_conformal_recall_);
 }

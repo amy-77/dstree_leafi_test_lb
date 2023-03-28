@@ -105,6 +105,8 @@ class Config {
   VALUE_TYPE filter_conformal_confidence_;
   VALUE_TYPE filter_conformal_default_confidence_;
   VALUE_TYPE filter_conformal_train_val_split_;
+  VALUE_TYPE filter_conformal_recall_;
+  bool filter_conformal_adjust_confidence_by_recall_;
 
   VALUE_TYPE filter_max_gpu_memory_mb_;
   std::string filter_model_setting_str_;

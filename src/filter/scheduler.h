@@ -23,6 +23,25 @@ enum THRESHOLD_MODE {
   ABSOLUTE = 1
 };
 
+// TODO refactor to ReduceLRSigmoid
+//void adjust_learning_rate(torch::optim::SGD &optimizer,
+//                          VALUE_TYPE max_lr,
+//                          VALUE_TYPE min_lr,
+//                          ID_TYPE epoch,
+//                          ID_TYPE max_epoch) {
+////    float new_lr = max_lr - (max_lr - min_lr) * ((float) epoch / (float) max_epoch);
+//
+//  float boundary = 9;
+//  float current_step = (epoch / max_epoch - 0.5f) * boundary;
+//  float new_lr = min_lr + (max_lr - min_lr) / (1 + exp(current_step));
+//
+//  for (auto &group : optimizer.param_groups()) {
+//    if (group.has_options()) {
+//      group.options().set_lr(new_lr);
+//    }
+//  }
+//}
+
 class TORCH_API ReduceLROnPlateau : public torch::optim::LRScheduler {
  public:
   explicit ReduceLROnPlateau(torch::optim::Optimizer &optimizer,

@@ -559,12 +559,6 @@ RESPONSE dstree::Index::filter_train_mthread() {
     }
   }
 
-#ifdef DEBUG
-  //#ifndef DEBUGGED
-  spdlog::debug("filter en-stack {:d} filters", filters.size());
-  //#endif
-#endif
-
   std::vector<std::unique_ptr<TrainCache>> train_caches;
 
   for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {

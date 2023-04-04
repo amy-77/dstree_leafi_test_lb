@@ -20,7 +20,7 @@ static std::string array2str(T *values, ID_TYPE length) {
                          values + length,
                          std::to_string(values[0]),
                          [](const std::string &a, T b) {
-                           return a + ", " + std::to_string(b);
+                           return a + " " + std::to_string(b);
                          });
 }
 

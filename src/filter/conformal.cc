@@ -126,7 +126,7 @@ VALUE_TYPE upcite::ConformalPredictor::get_alpha(VALUE_TYPE confidence) const {
 }
 
 VALUE_TYPE upcite::ConformalPredictor::get_alpha_by_pos(ID_TYPE pos) const {
-  if (pos >= 0 && pos <= alphas_.size()) {
+  if (pos >= 0 && pos < alphas_.size()) {
     return alphas_[pos];
   }
 
@@ -134,7 +134,7 @@ VALUE_TYPE upcite::ConformalPredictor::get_alpha_by_pos(ID_TYPE pos) const {
 }
 
 RESPONSE upcite::ConformalPredictor::set_alpha_by_pos(ID_TYPE pos) {
-  if (pos >= 0 && pos <= alphas_.size()) {
+  if (pos >= 0 && pos < alphas_.size()) {
     alpha_ = alphas_[pos];
     return SUCCESS;
   }

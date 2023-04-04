@@ -139,16 +139,16 @@ RESPONSE dstree::Filter::train() {
 #ifdef DEBUG
   if (!lb_distances_.empty()) {
     spdlog::debug("filter {:d} stream {:d} d_node{:s} = {:s}",
-                  stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
+                  id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
                   upcite::array2str(lb_distances_.data(), train_size_));
   }
 
   spdlog::debug("filter {:d} stream {:d} d_bsf{:s} = {:s}",
-                stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
+                id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
                 upcite::array2str(bsf_distances_.data(), train_size_));
 
   spdlog::debug("filter {:d} stream {:d} d_nn{:s} = {:s}",
-                stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
+                id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
                 upcite::array2str(nn_distances_.data(), train_size_));
 #endif
 
@@ -237,9 +237,9 @@ RESPONSE dstree::Filter::train() {
 
 #ifdef DEBUG
   spdlog::debug("filter {:d} stream {:d} t_losses = {:s}",
-                stream_id, id_, upcite::array2str(train_losses.data(), config_.get().filter_train_nepoch_));
+                id_, stream_id, upcite::array2str(train_losses.data(), config_.get().filter_train_nepoch_));
   spdlog::debug("filter {:d} stream {:d} v_losses = {:s}",
-                stream_id, id_, upcite::array2str(valid_losses.data(), config_.get().filter_train_nepoch_));
+                id_, stream_id, upcite::array2str(valid_losses.data(), config_.get().filter_train_nepoch_));
 #endif
 
 //    torch::NoGradGuard no_grad;
@@ -253,7 +253,7 @@ RESPONSE dstree::Filter::train() {
 
 #ifdef DEBUG
     spdlog::info("filter {:d} stream {:d} d_pred{:s} = {:s}",
-                 stream_id, id_, config_.get().filter_remove_square_ ? "" : "_sq",
+                 id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
                  upcite::array2str(predictions_array, train_size_));
 #endif
 

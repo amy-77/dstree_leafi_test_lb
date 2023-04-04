@@ -58,10 +58,10 @@ class Filter {
   VALUE_TYPE get_bsf_distance(ID_TYPE pos) const { return bsf_distances_[pos]; };
   VALUE_TYPE get_pred_distance(ID_TYPE pos) const { return pred_distances_[pos]; };
   VALUE_TYPE get_confidence_half_interval_by_pos(ID_TYPE pos) const {
-    return conformal_predictor_.get()->get_alpha_by_pos(pos);
+    return conformal_predictor_->get_alpha_by_pos(pos);
   };
   RESPONSE set_confidence_half_interval_by_pos(ID_TYPE pos) {
-    conformal_predictor_.get()->set_alpha_by_pos(pos);
+    conformal_predictor_->set_alpha_by_pos(pos);
     return SUCCESS;
   };
 

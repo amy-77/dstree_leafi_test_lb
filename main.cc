@@ -41,10 +41,10 @@ int main(int argc, char *argv[]) {
     status = index->load();
   } else {
     status = index->build();
+  }
 
-    if (config->on_disk_ || config->to_dump_index_) {
-      index->dump();
-    }
+  if (config->on_disk_ || config->to_dump_index_) {
+    index->dump();
   }
 
   if (status == FAILURE) {

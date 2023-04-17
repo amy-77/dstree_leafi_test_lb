@@ -95,6 +95,7 @@ class Config {
   std::string model_dump_file_postfix_;
 
   bool to_load_index_;
+  bool to_load_filters_;
   std::string index_load_folderpath_;
   std::string load_node_info_folderpath_; // predefined child folder
   std::string load_filters_folderpath_; // predefined child folder

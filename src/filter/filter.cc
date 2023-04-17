@@ -343,18 +343,73 @@ VALUE_TYPE dstree::Filter::infer(torch::Tensor &query_series) const {
 RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
   node_fos.write(reinterpret_cast<const char *>(&train_size_), sizeof(ID_TYPE));
 
-  node_fos.write(reinterpret_cast<const char *>(bsf_distances_.data()), sizeof(VALUE_TYPE) * bsf_distances_.size());
-  node_fos.write(reinterpret_cast<const char *>(nn_distances_.data()), sizeof(VALUE_TYPE) * nn_distances_.size());
+  // TODO condense size indicators into a bitmap, as they all = train_size_
+  // bsf_distances_
+  ID_TYPE size_placeholder = bsf_distances_.size();
+  node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+  if (!bsf_distances_.empty()) {
+    node_fos.write(reinterpret_cast<const char *>(bsf_distances_.data()), sizeof(VALUE_TYPE) * bsf_distances_.size());
+  }
 
+  // nn_distances_
+  size_placeholder = nn_distances_.size();
+  node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+  if (!nn_distances_.empty()) {
+    node_fos.write(reinterpret_cast<const char *>(nn_distances_.data()), sizeof(VALUE_TYPE) * nn_distances_.size());
+  }
+
+  // lb_distances_
+  size_placeholder = lb_distances_.size();
+  node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+  if (!lb_distances_.empty()) {
+    node_fos.write(reinterpret_cast<const char *>(lb_distances_.data()), sizeof(VALUE_TYPE) * lb_distances_.size());
+  }
+
+  // ub_distances_
+  size_placeholder = ub_distances_.size();
+  node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+  if (!ub_distances_.empty()) {
+    node_fos.write(reinterpret_cast<const char *>(ub_distances_.data()), sizeof(VALUE_TYPE) * ub_distances_.size());
+  }
+
+  // pred_distances_
+  size_placeholder = pred_distances_.size();
+  node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+  if (!pred_distances_.empty()) {
+    node_fos.write(reinterpret_cast<const char *>(pred_distances_.data()), sizeof(VALUE_TYPE) * pred_distances_.size());
+  }
+
+  if (is_active_) {
+    size_placeholder = model_setting_.model_setting_str.size();
+  } else {
+    size_placeholder = 0;
+  }
+  node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+  if (is_active_) {
+    node_fos.write(reinterpret_cast<const char *>(model_setting_.model_setting_str.data()),
+                   sizeof(model_setting_.model_setting_str));
+  }
+
+  ID_TYPE is_trained_placeholder = 0;
+  if (is_trained_) {
+    is_trained_placeholder = 1;
+  }
+  node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+  if (is_trained_) {
+    std::string model_filepath = config_.get().dump_filters_folderpath_ + std::to_string(id_) +
+        config_.get().model_dump_file_postfix_;
+
+    torch::save(model_, model_filepath);
+  }
+
+  ID_TYPE is_conformal_placeholder = 0;
+  if (config_.get().filter_is_conformal_) {
+    is_conformal_placeholder = 1;
+  }
+  node_fos.write(reinterpret_cast<const char *>(&is_conformal_placeholder), sizeof(ID_TYPE));
   if (config_.get().filter_is_conformal_) {
     conformal_predictor_->dump(node_fos);
   }
-
-  std::string model_filepath = config_.get().dump_filters_folderpath_ + std::to_string(id_) +
-      config_.get().model_dump_file_postfix_;
-
-  // TODO also dump the model setting
-  torch::save(model_, model_filepath);
 
   return SUCCESS;
 }
@@ -368,39 +423,117 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   train_size_ = ifs_id_buf[0];
 
-  read_nbytes = sizeof(VALUE_TYPE) * train_size_;
+  // bsf_distances_
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-  bsf_distances_.insert(bsf_distances_.begin(), ifs_value_buf, ifs_value_buf + train_size_);
-  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-  nn_distances_.insert(nn_distances_.begin(), ifs_value_buf, ifs_value_buf + train_size_);
+  ID_TYPE size_indicator = ifs_id_buf[0];
 
-  if (config_.get().filter_is_conformal_) {
-    // TODO support ad hoc cases?
+  if (size_indicator > 0) {
+    read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+    node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+    bsf_distances_.insert(bsf_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+  }
+
+  // nn_distances_
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_indicator = ifs_id_buf[0];
+
+  if (size_indicator > 0) {
+    read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+    node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+    nn_distances_.insert(nn_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+  }
+
+  // lb_distances_
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_indicator = ifs_id_buf[0];
+
+  if (size_indicator > 0) {
+    read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+    node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+    lb_distances_.insert(lb_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+  }
+
+  // ub_distances_
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_indicator = ifs_id_buf[0];
+
+  if (size_indicator > 0) {
+    read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+    node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+    ub_distances_.insert(ub_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+  }
+
+  // pred_distances_
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_indicator = ifs_id_buf[0];
+
+  if (size_indicator > 0) {
+    read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+    node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+    pred_distances_.insert(pred_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+  }
+
+  // model_setting_
+  is_active_ = false;
+
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_indicator = ifs_id_buf[0];
+  if (size_indicator > 0) {
+    std::string model_setting_str;
+    model_setting_str.resize(size_indicator);
+    node_ifs.read(const_cast<char *>(model_setting_str.data()), size_indicator);
+
+    if (config_.get().to_load_filters_) {
+      model_setting_ = MODEL_SETTING(model_setting_str);
+
+      is_active_ = true;
+    }
+  }
+
+  // model_
+  is_trained_ = false;
+
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_indicator = ifs_id_buf[0];
+  if (size_indicator > 0 && config_.get().to_load_filters_) {
+    std::string model_filepath = config_.get().load_filters_folderpath_ + std::to_string(id_) +
+        config_.get().model_dump_file_postfix_;
+
+    if (!fs::is_regular_file(model_filepath)) {
+      spdlog::error("Empty model_filepath found: {:s}", model_filepath);
+      return FAILURE;
+    }
+
+    // TODO instantiate the model according to the setting
+    model_ = std::make_unique<dstree::MLPFilter>(config_.get().series_length_,
+                                                 config_.get().filter_dim_latent_,
+                                                 config_.get().filter_train_dropout_p_,
+                                                 config_.get().filter_leaky_relu_negative_slope_);
+    model_->to(*device_);
+
+    torch::load(model_, model_filepath);
+
+    model_->eval();
+//  net->to(torch::Device(torch::kCPU));
+    c10::cuda::CUDACachingAllocator::emptyCache();
+
+    is_trained_ = true;
+  }
+
+  // conformal_predictor_
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_indicator = ifs_id_buf[0];
+  if (size_indicator > 0) {
+    // TODO load only if (config_.get().to_load_filters_); the current implementation works though
     conformal_predictor_->load(node_ifs, ifs_buf);
   }
-
-  std::string model_filepath = config_.get().load_filters_folderpath_ + std::to_string(id_) +
-      config_.get().model_dump_file_postfix_;
-
-  if (!fs::is_regular_file(model_filepath)) {
-    spdlog::error("Empty model_filepath found: {:s}", model_filepath);
-    return FAILURE;
-  }
-
-  // TODO also load the model setting
-  // TODO instantiate the model according to the setting
-  model_ = std::make_unique<dstree::MLPFilter>(config_.get().series_length_,
-                                               config_.get().filter_dim_latent_,
-                                               config_.get().filter_train_dropout_p_,
-                                               config_.get().filter_leaky_relu_negative_slope_);
-  model_->to(*device_);
-
-  torch::load(model_, model_filepath);
-  model_->eval();
-//  net->to(torch::Device(torch::kCPU));
-
-  c10::cuda::CUDACachingAllocator::emptyCache();
-  is_trained_ = true;
 
   return SUCCESS;
 }

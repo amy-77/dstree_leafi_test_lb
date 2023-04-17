@@ -82,30 +82,31 @@ std::vector<upcite::INTERVAL> upcite::ConformalRegressor::predict(std::vector<VA
 RESPONSE upcite::ConformalPredictor::dump(std::ofstream &node_fos) const {
   node_fos.write(reinterpret_cast<const char *>(&core_), sizeof(CONFORMAL_CORE));
 
-  ID_TYPE alphas_size = static_cast<ID_TYPE>(alphas_.size());
-  node_fos.write(reinterpret_cast<const char *>(&alphas_size), sizeof(ID_TYPE));
-  node_fos.write(reinterpret_cast<const char *>(alphas_.data()), sizeof(VALUE_TYPE) * alphas_.size());
+  // alphas can be recalculated
+//  ID_TYPE alphas_size = static_cast<ID_TYPE>(alphas_.size());
+//  node_fos.write(reinterpret_cast<const char *>(&alphas_size), sizeof(ID_TYPE));
+//  node_fos.write(reinterpret_cast<const char *>(alphas_.data()), sizeof(VALUE_TYPE) * alphas_.size());
 
   return SUCCESS;
 }
 
 RESPONSE upcite::ConformalPredictor::load(std::ifstream &node_ifs, void *ifs_buf) {
   auto ifs_core_buf = reinterpret_cast<CONFORMAL_CORE *>(ifs_buf);
-  auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
-  auto ifs_value_buf = reinterpret_cast<VALUE_TYPE *>(ifs_buf);
+//  auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
+//  auto ifs_value_buf = reinterpret_cast<VALUE_TYPE *>(ifs_buf);
 
   ID_TYPE read_nbytes = sizeof(CONFORMAL_CORE);
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   core_ = ifs_core_buf[0];
 
-  read_nbytes = sizeof(ID_TYPE);
-  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-  ID_TYPE alphas_size = ifs_id_buf[0];
-  alphas_.reserve(alphas_size);
-
-  read_nbytes = sizeof(VALUE_TYPE) * alphas_size;
-  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-  alphas_.insert(alphas_.begin(), ifs_value_buf, ifs_value_buf + alphas_size);
+//  read_nbytes = sizeof(ID_TYPE);
+//  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+//  ID_TYPE alphas_size = ifs_id_buf[0];
+//  alphas_.reserve(alphas_size);
+//
+//  read_nbytes = sizeof(VALUE_TYPE) * alphas_size;
+//  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+//  alphas_.insert(alphas_.begin(), ifs_value_buf, ifs_value_buf + alphas_size);
 
   return SUCCESS;
 }

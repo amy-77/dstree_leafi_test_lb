@@ -43,7 +43,7 @@ dstree::Index::Index(Config &config) :
     device_ = std::make_unique<torch::Device>(torch::kCPU);
   }
 
-  if (config_.get().require_neurofilter_ && !config_.get().to_load_index_) {
+  if (config_.get().require_neurofilter_) {
     allocator_ = std::make_unique<dstree::Allocator>(config);
   }
 }
@@ -718,12 +718,6 @@ RESPONSE dstree::Index::train() {
     filter_train();
   }
 
-  //
-  // get confidence intervals based on the required recall
-  if (config_.get().filter_is_conformal_ && config_.get().filter_conformal_adjust_confidence_by_recall_) {
-    allocator_.get()->set_confidence_from_recall();
-  }
-
   // support difference devices for training and inference
   if (config_.get().filter_infer_is_gpu_) {
     // TODO support multiple devices
@@ -755,6 +749,10 @@ RESPONSE dstree::Index::load() {
 
   leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare>(
       Compare(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));
+
+  if (config_.get().require_neurofilter_ && !config_.get().to_load_filters_) {
+    train();
+  }
 
   return SUCCESS;
 }
@@ -821,6 +819,12 @@ RESPONSE dstree::Index::search() {
 
       return FAILURE;
     }
+  }
+
+  //
+  // get confidence intervals based on the required recall, during search
+  if (config_.get().filter_is_conformal_ && config_.get().filter_conformal_adjust_confidence_by_recall_) {
+    allocator_.get()->set_confidence_from_recall();
   }
 
   VALUE_TYPE *series_ptr, *sketch_ptr = nullptr;

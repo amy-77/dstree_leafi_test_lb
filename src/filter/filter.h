@@ -86,8 +86,8 @@ class Filter {
   std::vector<VALUE_TYPE> bsf_distances_;
   std::vector<VALUE_TYPE> nn_distances_;
 
-  std::vector<VALUE_TYPE> lb_distances_;
-//  std::vector<VALUE_TYPE> node_upper_bound_distances_;
+  std::vector<VALUE_TYPE> lb_distances_; // lower bounds
+  std::vector<VALUE_TYPE> ub_distances_; // upper bounds
 
   std::vector<VALUE_TYPE> pred_distances_;
 };

@@ -73,6 +73,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     dump_filters_folderpath_(""),
     dump_data_folderpath_(""),
     to_load_index_(false),
+    to_load_filters_(false),
     index_load_folderpath_(""),
     load_node_info_folderpath_(""),
     load_filters_folderpath_(""),
@@ -188,6 +189,8 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Whether to dump the index structure (defaults: true for on-disk while false for in-memory)")
       ("load_index", po::bool_switch(&to_load_index_)->default_value(false),
        "Whether to load the index structure")
+      ("load_filters", po::bool_switch(&to_load_filters_)->default_value(false),
+       "Whether to load the trained filters")
       ("index_load_folderpath", po::value<std::string>(&index_load_folderpath_),
        "Index load root folderpath")
       ("filter_is_conformal", po::bool_switch(&filter_is_conformal_)->default_value(false),
@@ -323,18 +326,30 @@ dstree::Config::Config(int argc, char *argv[]) :
       index_dump_folderpath_ += "/";
     }
 
-    dump_node_info_folderpath_ = index_dump_folderpath_ + "node/";
+    if (dump_node_info_folderpath_.empty()) {
+      dump_node_info_folderpath_ = index_dump_folderpath_ + "node/";
+    } else if (!boost::algorithm::ends_with(dump_node_info_folderpath_, "/")) {
+      dump_node_info_folderpath_ += "/";
+    }
     if (!fs::is_directory(dump_node_info_folderpath_)) {
       fs::create_directory(dump_node_info_folderpath_);
     }
 
-    dump_data_folderpath_ = index_dump_folderpath_ + "data/";
+    if (dump_data_folderpath_.empty()) {
+      dump_data_folderpath_ = index_dump_folderpath_ + "data/";
+    } else if (!boost::algorithm::ends_with(dump_data_folderpath_, "/")) {
+      dump_data_folderpath_ += "/";
+    }
     if (!fs::is_directory(dump_data_folderpath_)) {
       fs::create_directory(dump_data_folderpath_);
     }
 
     if (require_neurofilter_) {
-      dump_filters_folderpath_ = index_dump_folderpath_ + "filter/";
+      if (dump_filters_folderpath_.empty()) {
+        dump_filters_folderpath_ = index_dump_folderpath_ + "filter/";
+      } else if (!boost::algorithm::ends_with(dump_filters_folderpath_, "/")) {
+        dump_filters_folderpath_ += "/";
+      }
       if (!fs::is_directory(dump_filters_folderpath_)) {
         fs::create_directory(dump_filters_folderpath_);
       }
@@ -352,28 +367,52 @@ dstree::Config::Config(int argc, char *argv[]) :
     if (!fs::is_directory(index_load_folderpath_)) {
       std::cout << "Empty index_load_folderpath found: " << index_load_folderpath_ << std::endl;
       exit(-1);
+    } else if (index_load_folderpath_ == index_dump_folderpath_) {
+      std::cout << "index_load_folderpath should be different from index_dump_folderpath" << std::endl;
+      exit(-1);
     }
 
     if (!boost::algorithm::ends_with(index_load_folderpath_, "/")) {
       index_load_folderpath_ += "/";
     }
 
-    load_node_info_folderpath_ = index_load_folderpath_ + "node/";
+    if (load_node_info_folderpath_.empty()) {
+      load_node_info_folderpath_ = index_load_folderpath_ + "node/";
+    } else if (!boost::algorithm::ends_with(load_node_info_folderpath_, "/")) {
+      load_node_info_folderpath_ += "/";
+    }
     if (!fs::is_directory(load_node_info_folderpath_)) {
       std::cout << "Empty load_node_info_folderpath found: " << load_node_info_folderpath_ << std::endl;
       exit(-1);
+    } else if (load_node_info_folderpath_ == dump_node_info_folderpath_) {
+      std::cout << "load_node_info_folderpath should be different from dump_node_info_folderpath" << std::endl;
+      exit(-1);
     }
 
-    load_data_folderpath_ = index_load_folderpath_ + "data/";
+    if (load_data_folderpath_.empty()) {
+      load_data_folderpath_ = index_load_folderpath_ + "data/";
+    } else if (!boost::algorithm::ends_with(load_data_folderpath_, "/")) {
+      load_data_folderpath_ += "/";
+    }
     if (!fs::is_directory(load_data_folderpath_)) {
       std::cout << "Empty load_data_folderpath found: " << load_data_folderpath_ << std::endl;
+      exit(-1);
+    } else if (load_data_folderpath_ == dump_data_folderpath_) {
+      std::cout << "load_data_folderpath should be different from dump_data_folderpath" << std::endl;
       exit(-1);
     }
 
     if (require_neurofilter_) {
-      load_filters_folderpath_ = index_load_folderpath_ + "filter/";
+      if (load_filters_folderpath_.empty()) {
+        load_filters_folderpath_ = index_load_folderpath_ + "filter/";
+      } else if (!boost::algorithm::ends_with(load_filters_folderpath_, "/")) {
+        load_filters_folderpath_ += "/";
+      }
       if (!fs::is_directory(load_filters_folderpath_)) {
         std::cout << "Empty load_filters_folderpath found: " << load_filters_folderpath_ << std::endl;
+        exit(-1);
+      } else if (load_filters_folderpath_ == dump_filters_folderpath_) {
+        std::cout << "load_filters_folderpath should be different from dump_filters_folderpath" << std::endl;
         exit(-1);
       }
     }

@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(TARGET filter)
-add_library(${TARGET} SHARED filter.cc scheduler.cc conformal.cc model.h)
+add_library(${TARGET} SHARED filter.cc scheduler.cc conformal.cc model.cc)
 
 set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_features(${TARGET} PRIVATE cxx_std_14)

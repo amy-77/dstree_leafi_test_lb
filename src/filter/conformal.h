@@ -22,10 +22,11 @@ enum CONFORMAL_CORE {
 
 class ConformalPredictor {
  public:
-  ConformalPredictor() : is_fitted_(false) {};
+  ConformalPredictor() : is_fitted_(false), is_trial_(false) {};
   ~ConformalPredictor() = default;
 
   VALUE_TYPE get_alpha() const;
+  RESPONSE set_alpha(VALUE_TYPE alpha, bool is_trial = true);
 
   VALUE_TYPE get_alpha_by_pos(ID_TYPE pos) const;
   RESPONSE set_alpha_by_pos(ID_TYPE pos);
@@ -35,6 +36,7 @@ class ConformalPredictor {
 
  protected:
   bool is_fitted_;
+  bool is_trial_;
   CONFORMAL_CORE core_;
 
   VALUE_TYPE confidence_level_;
@@ -42,7 +44,6 @@ class ConformalPredictor {
   VALUE_TYPE alpha_;
 
   std::vector<ERROR_TYPE> alphas_;
-
 };
 
 class ConformalRegressor : public ConformalPredictor {
@@ -61,12 +62,6 @@ class ConformalRegressor : public ConformalPredictor {
                    VALUE_TYPE confidence_level = -1,
                    VALUE_TYPE y_max = constant::MAX_VALUE,
                    VALUE_TYPE y_min = constant::MIN_VALUE);
-
-  std::vector<INTERVAL> predict(std::vector<VALUE_TYPE> &y_hat,
-//                                  std::vector<VALUE_TYPE> &sigmas, std::vector<ID_TYPE> &bins,
-                                VALUE_TYPE confidence_level = -1,
-                                VALUE_TYPE y_max = constant::MAX_VALUE,
-                                VALUE_TYPE y_min = constant::MIN_VALUE);
 
  private:
   std::unique_ptr<gsl_interp_accel> gsl_accel_;

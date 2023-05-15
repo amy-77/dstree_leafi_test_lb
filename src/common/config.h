@@ -117,6 +117,11 @@ class Config {
   bool filter_conformal_is_smoothen_;
   std::string filter_conformal_smoothen_method_;
   std::string filter_conformal_smoothen_core_;
+
+  VALUE_TYPE filter_trial_confidence_level_;
+  ID_TYPE filter_trial_iterations_;
+  ID_TYPE filter_trial_nnode_;
+  ID_TYPE filter_trial_filter_preselection_size_threshold_;
 };
 
 }

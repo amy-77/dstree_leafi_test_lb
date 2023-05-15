@@ -41,8 +41,12 @@ struct MODEL_SETTING {
     layer_size = 256;
     has_skip_connections = false;
 
-    gpu_sps = -1;
-    cpu_sps = -1;
+    gpu_mem_mb = -1;
+
+    gpu_ms_per_series = -1;
+    cpu_ms_per_series = -1;
+
+    pruning_prob = 0;
   };
 
   explicit MODEL_SETTING(const std::string& setting_str, std::string delim = "_") {
@@ -65,9 +69,6 @@ struct MODEL_SETTING {
         num_layer = std::stol(setting_segments[2]);
         layer_size = std::stol(setting_segments[3]);
         has_skip_connections = setting_segments[4] == "t";
-
-        gpu_sps = -1; // TODO test
-        cpu_sps = -1;
       } else {
         goto default_branch;  // default
       }
@@ -78,10 +79,14 @@ struct MODEL_SETTING {
       num_layer = 2;
       layer_size = 256;
       has_skip_connections = false;
-
-      gpu_sps = -1;
-      cpu_sps = -1;
     }
+
+    gpu_mem_mb = -1;
+
+    gpu_ms_per_series = -1;
+    cpu_ms_per_series = -1;
+
+    pruning_prob = 0;
   };
 
   ~MODEL_SETTING() = default;
@@ -93,10 +98,16 @@ struct MODEL_SETTING {
   ID_TYPE layer_size;
   bool has_skip_connections;
 
-  // TODO to evaluate and set
-  VALUE_TYPE gpu_sps;
-  VALUE_TYPE cpu_sps;
+  VALUE_TYPE gpu_mem_mb;
+
+  VALUE_TYPE gpu_ms_per_series;
+  VALUE_TYPE cpu_ms_per_series;
+
+  VALUE_TYPE pruning_prob;
 };
+
+extern MODEL_SETTING MODEL_SETTING_PLACEHOLDER;
+extern std::reference_wrapper<MODEL_SETTING> MODEL_SETTING_PLACEHOLDER_REF;
 
 namespace dstree {
 
@@ -105,11 +116,6 @@ class FilterModel : public torch::nn::Module {
   ~FilterModel() override {};
 
   virtual torch::Tensor forward(torch::Tensor &x) = 0;
-//  virtual torch::Tensor infer(torch::Tensor &x) = 0;
-
-// private:
-//  torch::nn::Linear fc1_{nullptr}, fc3_{nullptr};
-//  torch::nn::LeakyReLU activate_{nullptr};
 };
 
 class MLPFilter : public FilterModel {
@@ -121,17 +127,8 @@ class MLPFilter : public FilterModel {
 //    fc2 = register_module("fc2", torch::nn::Linear(dim_latent, dim_latent));
     fc3_ = register_module("fc3", torch::nn::Linear(dim_latent, 1));
 
-//    torch::nn::init::kaiming_uniform_(fc1->weight, negative_slope_, torch::kFanIn, torch::kLeakyReLU);
-//    torch::nn::init::kaiming_uniform_(fc2->weight, negative_slope_, torch::kFanIn, torch::kLeakyReLU);
-//    torch::nn::init::kaiming_uniform_(fc1->weight, 0, torch::kFanIn, torch::kTanh);
-//    torch::nn::init::kaiming_uniform_(fc2->weight, 0, torch::kFanIn, torch::kTanh);
-//    torch::nn::init::kaiming_uniform_(fc1->weight, 0, torch::kFanIn, torch::kSigmoid);
-//    torch::nn::init::kaiming_uniform_(fc2->weight, 0, torch::kFanIn, torch::kSigmoid);
-//    torch::nn::init::xavier_uniform_(fc3->weight, 1.0);
-
     activate_ = register_module("lkrelu", torch::nn::LeakyReLU(
         torch::nn::LeakyReLUOptions().negative_slope(negative_slope)));
-//     activate_ = register_module("sftp", torch::nn::Softplus(torch::nn::SoftplusOptions().beta(0.24).threshold(42.42)));
   }
 
   torch::Tensor forward(torch::Tensor &x) override {

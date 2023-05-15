@@ -564,7 +564,7 @@ RESPONSE dstree::Index::filter_train_mthread() {
   for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {
     at::cuda::CUDAStream new_stream = at::cuda::getStreamFromPool(false, config_.get().filter_device_id_);
 
-    spdlog::info("thread {:d} stream id = {:d}, query = {:d}, priority = {:d}",
+    spdlog::info("train thread {:d} stream id = {:d}, query = {:d}, priority = {:d}",
                  thread_id,
                  static_cast<ID_TYPE>(new_stream.id()),
                  static_cast<ID_TYPE>(new_stream.query()),

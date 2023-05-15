@@ -39,14 +39,17 @@ class Filter {
   };
 
   bool is_active() const { return is_active_; }
-  RESPONSE activate(const MODEL_SETTING &model_setting) {
-    model_setting_ = model_setting;
-    is_active_ = true;
+  RESPONSE activate(MODEL_SETTING &model_setting) {
+    return set_model(model_setting);
+  }
+
+  RESPONSE set_model(MODEL_SETTING &model_setting) {
+    model_setting_ref_ = model_setting;
 
     return SUCCESS;
   }
 
-  RESPONSE train();
+  RESPONSE train(bool is_trial = false);
   VALUE_TYPE infer(torch::Tensor &query_series) const;
 
   RESPONSE dump(std::ofstream &node_fos) const;
@@ -57,6 +60,8 @@ class Filter {
   VALUE_TYPE get_nn_distance(ID_TYPE pos) const { return nn_distances_[pos]; };
   VALUE_TYPE get_bsf_distance(ID_TYPE pos) const { return bsf_distances_[pos]; };
   VALUE_TYPE get_pred_distance(ID_TYPE pos) const { return pred_distances_[pos]; };
+
+  VALUE_TYPE get_valid_pruning_ratio() const;
 
   VALUE_TYPE get_abs_error_interval() const {
     return conformal_predictor_->get_alpha();
@@ -83,8 +88,11 @@ class Filter {
   ID_TYPE id_;
 
   bool is_active_;
+  std::reference_wrapper<MODEL_SETTING> model_setting_ref_;
+  // for filter loading only
   MODEL_SETTING model_setting_;
-  std::shared_ptr<FilterModel> model_; // torch::save only takes shared_ptr
+  // torch::save only takes shared_ptr
+  std::shared_ptr<FilterModel> model_;
   std::unique_ptr<ConformalRegressor> conformal_predictor_;
 
   // TODO ref?
@@ -92,6 +100,7 @@ class Filter {
   std::unique_ptr<torch::Device> device_;
 
   bool is_trained_;
+  bool is_distances_preprocessed_, is_distances_logged;
   ID_TYPE train_size_;
 
   std::reference_wrapper<torch::Tensor> shared_train_queries_;

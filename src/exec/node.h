@@ -69,8 +69,7 @@ class Node {
   VALUE_TYPE get_filter_pred_distance(ID_TYPE pos) const { return filter_->get_pred_distance(pos); };
 
   // TODO deprecate the object wrapper
-  std::reference_wrapper<Filter> get_filter() const { return std::ref(*filter_); }
-
+  std::reference_wrapper<Filter> get_filter() { return std::ref(*filter_); }
 
   VALUE_TYPE get_filter_abs_error_interval() const {
     return filter_->get_abs_error_interval();
@@ -100,7 +99,7 @@ class Node {
     return SUCCESS;
   }
 
-  RESPONSE activate_filter(const MODEL_SETTING &model_setting) {
+  RESPONSE activate_filter(MODEL_SETTING &model_setting) {
     if (filter_ != nullptr) {
       return filter_->activate(model_setting);
     } else {

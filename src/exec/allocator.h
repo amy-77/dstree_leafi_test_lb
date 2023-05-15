@@ -20,9 +20,9 @@ namespace dstree {
 struct FilterInfo {
  public:
   explicit FilterInfo(Node &node) :
-      node_(node) {
+      node_(node),
+      model_setting(MODEL_SETTING_PLACEHOLDER_REF) {
     score = -1;
-    model_setting = MODEL_SETTING();
 
     external_pruning_probability_ = -1;
     pruning_probability_ = -1;
@@ -31,7 +31,7 @@ struct FilterInfo {
   ~FilterInfo() = default;
 
   VALUE_TYPE score;
-  MODEL_SETTING model_setting;
+  std::reference_wrapper<MODEL_SETTING> model_setting;
 
   std::reference_wrapper<Node> node_;
 
@@ -57,7 +57,7 @@ class Allocator {
                      ID_TYPE nfilters = -1);
   ~Allocator() = default;
 
-  RESPONSE push_instance(const FilterInfo& filter_info);
+  RESPONSE push_instance(const FilterInfo &filter_info);
 
   // TODO this is a combination optimization problem
   // the current solution is to find the best model setting for each filter, and then pick the top filters
@@ -67,19 +67,12 @@ class Allocator {
   RESPONSE set_confidence_from_recall();
 
  private:
+  RESPONSE trial_collect_mthread();
   RESPONSE evaluate();
 
   std::reference_wrapper<Config> config_;
 
-  // VALUE_TYPE num. series processed per second
-  // TODO test cpu_sps_
-  VALUE_TYPE cpu_sps_;
-
-  // overhead per node: extra compared to each other
-  // cpu overhead: none
-  // gpu overhead: exchange between gpu memory and main memory; fixed across models
-  // TODO test gpu_overhead_
-  VALUE_TYPE cpu_overhead_pn_, gpu_overhead_pn_;
+  VALUE_TYPE cpu_ms_per_series_;
 
   // however performance of different combinations should be provided (or tested?)
   // maybe select a subset of (e.g., 10) nodes, train all candidate models on these
@@ -87,7 +80,6 @@ class Allocator {
   // number of nodes ~10^4
   // number of trail trains: (#threads, or 16, say) * ~10 (should be a selected subset of all possible combinations)
   std::vector<MODEL_SETTING> candidate_model_settings_;
-  std::map<std::string, VALUE_TYPE> model_gpu_memory_fingerprint_mb_;
   VALUE_TYPE available_gpu_memory_mb_;
 
   std::vector<FilterInfo> filter_infos_;

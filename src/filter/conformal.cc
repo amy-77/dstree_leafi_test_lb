@@ -37,6 +37,7 @@ RESPONSE upcite::ConformalRegressor::fit(std::vector<ERROR_TYPE> &residuals) {
 
   if (core_ == DISCRETE) {
     is_fitted_ = true;
+    is_trial_ = false;
 
     abs_error_i_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence_level_);
     alpha_ = alphas_[abs_error_i_];
@@ -65,6 +66,7 @@ RESPONSE upcite::ConformalRegressor::fit_spline(std::string &spline_core, std::v
   gsl_spline_init(gsl_spline_.get(), recalls.data(), alphas_.data(), recalls.size());
 
   is_fitted_ = true;
+  is_trial_ = false;
 
   return SUCCESS;
 }
@@ -81,28 +83,11 @@ upcite::INTERVAL upcite::ConformalRegressor::predict(VALUE_TYPE y_hat,
     }
 
     return {y_hat - alpha_, y_hat + alpha_};
+  } else if (is_trial_) {
+    return {y_hat - alpha_, y_hat + alpha_};
   } else {
     return {y_min, y_max};
   }
-}
-
-std::vector<upcite::INTERVAL> upcite::ConformalRegressor::predict(std::vector<VALUE_TYPE> &y_hat,
-                                                                  VALUE_TYPE confidence_level,
-                                                                  VALUE_TYPE y_max,
-                                                                  VALUE_TYPE y_min) {
-  if (confidence_level >= 0 && confidence_level <= 1 && !upcite::is_equal(confidence_level_, confidence_level)) {
-    abs_error_i_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence_level);
-    alpha_ = alphas_[abs_error_i_];
-    confidence_level_ = confidence_level;
-  }
-
-  auto y_intervals = upcite::make_reserved<upcite::INTERVAL>(y_hat.size());
-
-  for (VALUE_TYPE y_i : y_hat) {
-    y_intervals.emplace_back(y_i - alpha_, y_i + alpha_);
-  }
-
-  return y_intervals;
 }
 
 RESPONSE upcite::ConformalPredictor::dump(std::ofstream &node_fos) const {
@@ -145,6 +130,25 @@ VALUE_TYPE upcite::ConformalPredictor::get_alpha() const {
   return constant::MAX_VALUE;
 }
 
+RESPONSE upcite::ConformalPredictor::set_alpha(VALUE_TYPE alpha, bool is_trial) {
+  if (is_trial) {
+    if (is_fitted_) {
+      spdlog::error("conformal model is already fitted; cannot run trial");
+      return FAILURE;
+    } else {
+      alpha_ = alpha;
+
+      is_trial_ = true;
+    }
+  } else if (is_fitted_) {
+    spdlog::error("conformal model is already fitted; cannot directly adjust alpha");
+    return FAILURE;
+  } else {
+    alpha_ = alpha;
+  }
+
+  return SUCCESS;
+}
 VALUE_TYPE upcite::ConformalPredictor::get_alpha_by_pos(ID_TYPE pos) const {
   if (pos >= 0 && pos < alphas_.size()) {
     return alphas_[pos];
@@ -156,6 +160,8 @@ VALUE_TYPE upcite::ConformalPredictor::get_alpha_by_pos(ID_TYPE pos) const {
 RESPONSE upcite::ConformalPredictor::set_alpha_by_pos(ID_TYPE pos) {
   if (pos >= 0 && pos < alphas_.size()) {
     alpha_ = alphas_[pos];
+    confidence_level_ = -1;
+
     return SUCCESS;
   }
 
@@ -166,6 +172,7 @@ RESPONSE upcite::ConformalRegressor::set_alpha_by_recall(VALUE_TYPE recall) {
   assert(gsl_accel_ != nullptr && gsl_spline_ != nullptr);
 
   alpha_ = gsl_spline_eval(gsl_spline_.get(), recall, gsl_accel_.get());
+  confidence_level_ = -1;
 
   return SUCCESS;
 }

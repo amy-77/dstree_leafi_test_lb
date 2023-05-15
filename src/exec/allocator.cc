@@ -7,6 +7,10 @@
 
 #include <spdlog/spdlog.h>
 #include <cuda.h>
+#include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
+
+#include "vec.h"
 
 namespace dstree = upcite::dstree;
 
@@ -14,11 +18,7 @@ dstree::Allocator::Allocator(dstree::Config &config,
                              ID_TYPE nfilters) :
     config_(config),
     is_recall_calculated_(false) {
-  cpu_sps_ = -1;
-
-  // TODO test overhead
-  cpu_overhead_pn_ = 0;
-  gpu_overhead_pn_ = -1;
+  cpu_ms_per_series_ = -1;
 
   available_gpu_memory_mb_ = config.filter_max_gpu_memory_mb_;
 
@@ -36,25 +36,194 @@ RESPONSE dstree::Allocator::push_instance(const dstree::FilterInfo &filter_info)
   return SUCCESS;
 }
 
+struct TrialCache {
+  TrialCache(dstree::Config &config,
+             ID_TYPE thread_id,
+             at::cuda::CUDAStream stream,
+             std::vector<upcite::MODEL_SETTING> &candidate_model_settings,
+             std::vector<dstree::FilterInfo> filter_infos,
+             ID_TYPE trial_nnode,
+             ID_TYPE trial_nmodel,
+             std::vector<ID_TYPE> &sampled_filter_idx,
+             std::vector<VALUE_TYPE> &filter_pruning_ratios,
+             ID_TYPE *trial_sample_i_ptr,
+             pthread_mutex_t *sample_idx_mutex) :
+      config_(config),
+      thread_id_(thread_id),
+      stream_(stream),
+      candidate_model_settings_ref_(candidate_model_settings),
+      filter_infos_ref_(filter_infos),
+      trial_nnode_(trial_nnode),
+      trial_nmodel_(trial_nmodel),
+      sampled_filter_idx_ref_(sampled_filter_idx),
+      filter_pruning_ratios_ref_(filter_pruning_ratios),
+      trial_sample_i_ptr_(trial_sample_i_ptr),
+      sample_idx_mutex_(sample_idx_mutex) {}
+  ~TrialCache() = default;
+
+  std::reference_wrapper<dstree::Config> config_;
+
+  ID_TYPE thread_id_;
+
+  at::cuda::CUDAStream stream_;
+
+  std::reference_wrapper<std::vector<upcite::MODEL_SETTING>> candidate_model_settings_ref_;
+  std::reference_wrapper<std::vector<dstree::FilterInfo>> filter_infos_ref_;
+
+  ID_TYPE trial_nnode_;
+  ID_TYPE trial_nmodel_;
+
+  std::reference_wrapper<std::vector<ID_TYPE>> sampled_filter_idx_ref_;
+  std::reference_wrapper<std::vector<VALUE_TYPE>> filter_pruning_ratios_ref_;
+
+  ID_TYPE *trial_sample_i_ptr_;
+  pthread_mutex_t *sample_idx_mutex_;
+};
+
+void trial_thread_F(TrialCache &trial_cache) {
+  at::cuda::setCurrentCUDAStream(trial_cache.stream_);
+  at::cuda::CUDAStreamGuard guard(trial_cache.stream_); // compiles with libtorch-gpu
+
+  while (true) {
+    pthread_mutex_lock(trial_cache.sample_idx_mutex_);
+    if ((*trial_cache.trial_sample_i_ptr_) >= trial_cache.trial_nnode_) {
+      pthread_mutex_unlock(trial_cache.sample_idx_mutex_);
+
+      break;
+    } else {
+      ID_TYPE trial_sample_i = *trial_cache.trial_sample_i_ptr_;
+      *trial_cache.trial_sample_i_ptr_ += 1;
+      pthread_mutex_unlock(trial_cache.sample_idx_mutex_);
+
+      std::reference_wrapper<dstree::FilterInfo> filter_info = trial_cache.filter_infos_ref_.get()[trial_sample_i];
+      auto filter_ref = filter_info.get().node_.get().get_filter();
+
+      for (ID_TYPE model_i = 0; model_i < trial_cache.trial_nmodel_; ++model_i) {
+        auto &candidate_model_setting = trial_cache.candidate_model_settings_ref_.get()[model_i];
+
+        filter_ref.get().set_model(candidate_model_setting);
+        filter_ref.get().train(true);
+
+        // 2-d array of [no. models, no. nodes]
+        trial_cache.filter_pruning_ratios_ref_.get()[trial_cache.trial_nnode_ * model_i + trial_sample_i] =
+            filter_ref.get().get_valid_pruning_ratio();
+      }
+    }
+  }
+}
+
+RESPONSE dstree::Allocator::trial_collect_mthread() {
+  // TODO test cpu_ms_per_series_
+
+  std::sort(filter_infos_.begin(), filter_infos_.end(), dstree::compDecreFilterNSeries);
+
+  ID_TYPE end_i_exclusive = filter_infos_.size();
+  while (end_i_exclusive > 0 && filter_infos_[end_i_exclusive].node_.get().get_size()
+      > config_.get().filter_trial_filter_preselection_size_threshold_) {
+    end_i_exclusive -= 1;
+  }
+
+  ID_TYPE offset = 0;
+  ID_TYPE step = end_i_exclusive / config_.get().filter_trial_nnode_;
+
+  auto sampled_filter_idx = upcite::make_reserved<ID_TYPE>(config_.get().filter_trial_nnode_);
+  for (ID_TYPE sample_i = 0; sample_i < config_.get().filter_trial_nnode_; ++sample_i) {
+    sampled_filter_idx.push_back(offset + sample_i + step);
+  }
+
+  // 2-d array of [no. models, no. nodes]
+  auto filter_pruning_ratios = upcite::make_reserved<VALUE_TYPE>(
+      config_.get().filter_trial_nnode_ * candidate_model_settings_.size());
+
+  std::vector<std::unique_ptr<TrialCache>> trial_caches;
+  std::unique_ptr<pthread_mutex_t> sample_idx_mutex = std::make_unique<pthread_mutex_t>();
+  ID_TYPE trial_sample_i = 0;
+
+  for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {
+    at::cuda::CUDAStream new_stream = at::cuda::getStreamFromPool(false, config_.get().filter_device_id_);
+
+    spdlog::info("trial thread {:d} stream id = {:d}, query = {:d}, priority = {:d}",
+                 thread_id,
+                 static_cast<ID_TYPE>(new_stream.id()),
+                 static_cast<ID_TYPE>(new_stream.query()),
+                 static_cast<ID_TYPE>(new_stream.priority())); // compiles with libtorch-gpu
+
+    trial_caches.emplace_back(std::make_unique<TrialCache>(config_,
+                                                           thread_id,
+                                                           std::move(new_stream),
+                                                           std::ref(candidate_model_settings_),
+                                                           std::ref(filter_infos_),
+                                                           config_.get().filter_trial_nnode_,
+                                                           candidate_model_settings_.size(),
+                                                           std::ref(sampled_filter_idx),
+                                                           std::ref(filter_pruning_ratios),
+                                                           &trial_sample_i,
+                                                           sample_idx_mutex.get()));
+  }
+
+  std::vector<std::thread> threads;
+
+  for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {
+    threads.emplace_back(trial_thread_F, std::ref(*trial_caches[thread_id]));
+  }
+
+  for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {
+    threads[thread_id].join();
+  }
+
+#ifdef DEBUG
+  auto sampled_filter_ids = upcite::make_reserved<ID_TYPE>(config_.get().filter_trial_nnode_);
+  for (ID_TYPE filter_i = 0; filter_i < config_.get().filter_trial_nnode_; ++filter_i) {
+    sampled_filter_ids.push_back(filter_infos_[sampled_filter_idx[filter_i]].node_.get().get_id());
+  }
+
+  spdlog::info("allocator sampled node ids = {:s}",
+                upcite::array2str(sampled_filter_ids.data(), sampled_filter_ids.size()));
+  spdlog::info("allocator trial pruning ratios = {:s}",
+               upcite::array2str(filter_pruning_ratios.data(), filter_pruning_ratios.size()));
+#endif
+
+  for (ID_TYPE model_i = 0; model_i < candidate_model_settings_.size(); ++model_i) {
+    VALUE_TYPE mean = 0;
+
+    for (ID_TYPE sample_i = 0; sample_i < sampled_filter_idx.size(); ++sample_i) {
+      mean += filter_pruning_ratios[sampled_filter_idx.size() * model_i + sample_i];
+    }
+
+    candidate_model_settings_[model_i].pruning_prob = mean / sampled_filter_idx.size();
+
+#ifdef DEBUG
+    spdlog::info("allocator model {:s} pruning ratio = {:.4f}",
+                 candidate_model_settings_[model_i].model_setting_str,
+                 candidate_model_settings_[model_i].pruning_prob);
+#endif
+  }
+
+  return SUCCESS;
+}
+
 RESPONSE dstree::Allocator::evaluate() {
+  trial_collect_mthread();
+
   for (auto &filter_info : filter_infos_) {
     filter_info.score = constant::MIN_VALUE;
 
-    for (auto candidate_model_setting_ : candidate_model_settings_) {
-
+    for (auto &candidate_model_setting_ : candidate_model_settings_) {
       // TODO support model in cpu
-      double_t amortized_gpu_sps =
-          static_cast<double_t>(candidate_model_setting_.gpu_sps + gpu_overhead_pn_ - cpu_overhead_pn_)
-              / static_cast<double_t>(filter_info.node_.get().get_size());
+      double_t amortized_gpu_sps = static_cast<double_t>(candidate_model_setting_.gpu_ms_per_series)
+          / static_cast<double_t>(filter_info.node_.get().get_size());
 
-      if (amortized_gpu_sps > cpu_sps_) {
-        spdlog::error("model {:s} slower than cpu: {:f} > {:f}",
-                      candidate_model_setting_.model_setting_str, amortized_gpu_sps, cpu_sps_);
+      if (amortized_gpu_sps > cpu_ms_per_series_) {
+        spdlog::error("allocator model {:s} slower than cpu: {:f} > {:f}",
+                      candidate_model_setting_.model_setting_str, amortized_gpu_sps, cpu_ms_per_series_);
       }
 
       auto gain = static_cast<VALUE_TYPE>(static_cast<double_t>(filter_info.node_.get().get_size())
           * static_cast<double_t>((1 - filter_info.external_pruning_probability_) * filter_info.pruning_probability_)
-          * static_cast<double_t>(cpu_sps_ - amortized_gpu_sps));
+          * static_cast<double_t>(cpu_ms_per_series_ - amortized_gpu_sps));
+
+      // TODO record all gains in a matrix, for knapsack solver
+      // TODO map all memory overhead in a matrix, for knapsack solver
 
       if (gain > filter_info.score) {
         filter_info.score = gain;
@@ -69,6 +238,8 @@ RESPONSE dstree::Allocator::evaluate() {
 RESPONSE dstree::Allocator::assign() {
   if (config_.get().filter_allocate_is_gain_) {
     evaluate();
+
+    // TODO knapsack solver
 
     std::sort(filter_infos_.begin(), filter_infos_.end(), dstree::compDecreFilterScore);
   } else { // default
@@ -111,7 +282,7 @@ RESPONSE dstree::Allocator::assign() {
     }
 
     if (filter_info.node_.get().activate_filter(filter_info.model_setting) == SUCCESS) {
-      allocated_gpu_memory_mb += model_gpu_memory_fingerprint_mb_[filter_info.model_setting.model_setting_str];
+      allocated_gpu_memory_mb += filter_info.model_setting.gpu_mem_mb;
       allocated_filters_count += 1;
     }
   }

@@ -6,6 +6,7 @@
 #include "filter.h"
 
 #include <cmath>
+#include <chrono>
 
 #include <boost/filesystem.hpp>
 #include <torch/data/example.h>
@@ -65,6 +66,8 @@ dstree::Filter::Filter(dstree::Config &config,
     is_active_(false),
     shared_train_queries_(shared_train_queries),
     is_trained_(false),
+    is_distances_preprocessed_(false),
+    is_distances_logged(false),
     train_size_(0) {
 //  torch::Device device = torch::Device(c10::DeviceType::Lazy);
 
@@ -91,8 +94,8 @@ dstree::Filter::Filter(dstree::Config &config,
   }
 }
 
-RESPONSE dstree::Filter::train() {
-  if (is_trained_) {
+RESPONSE dstree::Filter::train(bool is_trial) {
+  if (is_trained_ || config_.get().to_load_filters_) {
     return FAILURE;
   }
 
@@ -109,21 +112,25 @@ RESPONSE dstree::Filter::train() {
 //#endif
 #endif
 
-  if (is_active_ && model_ == nullptr) {
-    // TODO instantiate the model according to the assigned model_setting_
-    model_ = std::make_unique<dstree::MLPFilter>(config_.get().series_length_,
-                                                 config_.get().filter_dim_latent_,
-                                                 config_.get().filter_train_dropout_p_,
-                                                 config_.get().filter_leaky_relu_negative_slope_);
-    model_->to(*device_);
+  if (!is_active_ && !is_trial) {
+    spdlog::error("filter {:d} neither is_active nor is_trial; exit", id_);
+    spdlog::shutdown();
+    exit(FAILURE);
   }
+
+  // TODO instantiate the model according to the assigned model_setting_
+  model_ = std::make_unique<dstree::MLPFilter>(config_.get().series_length_,
+                                               config_.get().filter_dim_latent_,
+                                               config_.get().filter_train_dropout_p_,
+                                               config_.get().filter_leaky_relu_negative_slope_);
+  model_->to(*device_);
 
   ID_TYPE stream_id = -1;
   if (config_.get().filter_train_is_gpu_) {
     stream_id = at::cuda::getCurrentCUDAStream(config_.get().filter_device_id_).id(); // compiles with libtorch-gpu
   }
 
-  if (config_.get().filter_remove_square_) {
+  if (config_.get().filter_remove_square_ && !is_distances_preprocessed_) {
     for (ID_TYPE i = 0; i < train_size_; ++i) {
       nn_distances_[i] = sqrt(nn_distances_[i]);
       bsf_distances_[i] = sqrt(bsf_distances_[i]);
@@ -134,22 +141,30 @@ RESPONSE dstree::Filter::train() {
         lb_distances_[i] = sqrt(lb_distances_[i]);
       }
     }
+
+    is_distances_preprocessed_ = true;
   }
 
 #ifdef DEBUG
-  if (!lb_distances_.empty()) {
-    spdlog::debug("filter {:d} stream {:d} d_node{:s} = {:s}",
+//#ifndef DEBUGGED
+  if (!is_distances_logged) {
+    if (!lb_distances_.empty()) {
+      spdlog::debug("filter {:d} stream {:d} d_node{:s} = {:s}",
+                    id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
+                    upcite::array2str(lb_distances_.data(), train_size_));
+    }
+
+    spdlog::debug("filter {:d} stream {:d} d_bsf{:s} = {:s}",
                   id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
-                  upcite::array2str(lb_distances_.data(), train_size_));
+                  upcite::array2str(bsf_distances_.data(), train_size_));
+
+    spdlog::debug("filter {:d} stream {:d} d_nn{:s} = {:s}",
+                  id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
+                  upcite::array2str(nn_distances_.data(), train_size_));
+
+    is_distances_logged = true;
   }
-
-  spdlog::debug("filter {:d} stream {:d} d_bsf{:s} = {:s}",
-                id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
-                upcite::array2str(bsf_distances_.data(), train_size_));
-
-  spdlog::debug("filter {:d} stream {:d} d_nn{:s} = {:s}",
-                id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
-                upcite::array2str(nn_distances_.data(), train_size_));
+//#endif
 #endif
 
   ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
@@ -236,51 +251,63 @@ RESPONSE dstree::Filter::train() {
   }
 
 #ifdef DEBUG
-  spdlog::debug("filter {:d} stream {:d} t_losses = {:s}",
-                id_, stream_id, upcite::array2str(train_losses.data(), config_.get().filter_train_nepoch_));
-  spdlog::debug("filter {:d} stream {:d} v_losses = {:s}",
-                id_, stream_id, upcite::array2str(valid_losses.data(), config_.get().filter_train_nepoch_));
+  spdlog::debug("filter {:d} stream {:d} model {:s} t_losses = {:s}",
+                id_, stream_id, model_setting_ref_.get().model_setting_str,
+                upcite::array2str(train_losses.data(), config_.get().filter_train_nepoch_));
+  spdlog::debug("filter {:d} stream {:d} model {:s} v_losses = {:s}",
+                id_, stream_id, model_setting_ref_.get().model_setting_str,
+                upcite::array2str(valid_losses.data(), config_.get().filter_train_nepoch_));
 #endif
 
 //    torch::NoGradGuard no_grad;
-    c10::InferenceMode guard;
-    model_->eval();
+  c10::InferenceMode guard;
+  model_->eval();
 
-    auto prediction = model_->forward(shared_train_queries_).detach().cpu();
-    VALUE_TYPE *predictions_array = prediction.detach().cpu().contiguous().data_ptr<VALUE_TYPE>();
+  auto prediction = model_->forward(shared_train_queries_).detach().cpu();
+  VALUE_TYPE *predictions_array = prediction.detach().cpu().contiguous().data_ptr<VALUE_TYPE>();
 
-    pred_distances_.insert(pred_distances_.end(), predictions_array, predictions_array + train_size_);
+  pred_distances_.insert(pred_distances_.end(), predictions_array, predictions_array + train_size_);
 
 #ifdef DEBUG
-    spdlog::info("filter {:d} stream {:d} d_pred{:s} = {:s}",
-                 id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
-                 upcite::array2str(predictions_array, train_size_));
+  spdlog::info("filter {:d} stream {:d} model {:s} d_pred{:s} = {:s}",
+               id_, stream_id, model_setting_ref_.get().model_setting_str,
+               config_.get().filter_remove_square_ ? "" : "_sq",
+               upcite::array2str(predictions_array, train_size_));
 #endif
 
-    if (config_.get().filter_is_conformal_) {
-      ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
-      auto residuals = upcite::make_reserved<ERROR_TYPE>(num_conformal_examples + 2);
+  if (config_.get().filter_is_conformal_) {
+    ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+    auto residuals = upcite::make_reserved<ERROR_TYPE>(num_conformal_examples + 2);
 
-      // residuals with two sentries, i.e., 0 and max_pred_distance
-      residuals.push_back(0);
-      residuals.push_back(*std::max_element(std::begin(pred_distances_) + num_train_examples,
-                                            std::begin(pred_distances_) + num_train_examples + num_conformal_examples));
+    // residuals with two sentries, i.e., 0 and max_pred_distance
+    residuals.push_back(0);
+    residuals.push_back(*std::max_element(std::begin(pred_distances_) + num_train_examples,
+                                          std::begin(pred_distances_) + num_train_examples + num_conformal_examples));
 
-      for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
-        // TODO torch::Tensor to ptr is not stable
-        if (predictions_array[num_train_examples + i] > constant::MIN_VALUE &&
-            predictions_array[num_train_examples + i] < constant::MAX_VALUE &&
-            !upcite::equals_zero(predictions_array[num_train_examples + i])) {
-          // TODO not necessary for global symmetrical confidence intervals
-          residuals.emplace_back(predictions_array[num_train_examples + i] - nn_distances_[num_train_examples + i]);
-        }
+    for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
+      // TODO torch::Tensor to ptr is not stable
+      if (predictions_array[num_train_examples + i] > constant::MIN_VALUE &&
+          predictions_array[num_train_examples + i] < constant::MAX_VALUE &&
+          !upcite::equals_zero(predictions_array[num_train_examples + i])) {
+        // TODO not necessary for global symmetrical confidence intervals
+        residuals.emplace_back(predictions_array[num_train_examples + i] - nn_distances_[num_train_examples + i]);
       }
-
-      conformal_predictor_->fit(residuals);
     }
 
-#ifdef DEBUG
-  if (torch::cuda::is_available() && id_ == 0) {
+    if (is_trial) {
+      for (auto &residual : residuals) { residual = residual < 0 ? -residual : residual; }
+      std::sort(residuals.begin(), residuals.end());
+
+      ID_TYPE residual_i = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(residuals.size())
+          * config_.get().filter_trial_confidence_level_);
+
+      conformal_predictor_->set_alpha(residuals[residual_i], true);
+    } else {
+      conformal_predictor_->fit(residuals);
+    }
+  }
+
+  if (torch::cuda::is_available() && model_setting_ref_.get().gpu_mem_mb <= constant::EPSILON) {
     size_t memory_size = 0;
 
     for (const auto &parameter : model_->parameters()) {
@@ -291,14 +318,48 @@ RESPONSE dstree::Filter::train() {
       memory_size += buffer.nbytes();
     }
 
-    spdlog::info("filter {:d} gpu mem = {:.3f}MB", id_, (static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024)));
-  }
+    model_setting_ref_.get().gpu_mem_mb = static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024);
+
+    auto trial_query = shared_train_queries_.get().index({torch::indexing::Slice(0, 1)}).clone();
+    auto trial_predictions = make_reserved<VALUE_TYPE>(config_.get().filter_trial_iterations_);
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for (ID_TYPE trial_i = 0; trial_i < config_.get().filter_trial_iterations_; ++trial_i) {
+      VALUE_TYPE pred = model_->forward(trial_query).item<VALUE_TYPE>();
+
+      if (conformal_predictor_ != nullptr) {
+        pred = conformal_predictor_->predict(pred).left_bound_;
+      }
+
+      if (config_.get().filter_remove_square_) {
+        trial_predictions.push_back(pred * pred);
+      } else {
+        trial_predictions.push_back(pred);
+      }
+    }
+
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+
+    model_setting_ref_.get().gpu_ms_per_series =
+        duration.count() / static_cast<VALUE_TYPE>(config_.get().filter_trial_iterations_);
+
+#ifdef DEBUG
+    spdlog::info("model {:s} gpu mem = {:.3f}MB, time = {:.3f}ms",
+                 model_setting_ref_.get().model_setting_str,
+                 model_setting_ref_.get().gpu_mem_mb,
+                 model_setting_ref_.get().gpu_ms_per_series);
 #endif
+  }
 
 //  net->to(torch::Device(torch::kCPU));
   c10::cuda::CUDACachingAllocator::emptyCache();
 
-  is_trained_ = true;
+  if (!is_trial) {
+    is_trained_ = true;
+  }
+
   return SUCCESS;
 }
 
@@ -361,14 +422,14 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
   }
 
   if (is_active_) {
-    size_placeholder = model_setting_.model_setting_str.size();
+    size_placeholder = model_setting_ref_.get().model_setting_str.size();
   } else {
     size_placeholder = 0;
   }
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
   if (is_active_) {
-    node_fos.write(reinterpret_cast<const char *>(model_setting_.model_setting_str.data()),
-                   sizeof(model_setting_.model_setting_str));
+    node_fos.write(reinterpret_cast<const char *>(model_setting_ref_.get().model_setting_str.data()),
+                   sizeof(model_setting_ref_.get().model_setting_str));
   }
 
   ID_TYPE is_trained_placeholder = 0;
@@ -471,6 +532,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
 
     if (config_.get().to_load_filters_) {
       model_setting_ = MODEL_SETTING(model_setting_str);
+      model_setting_ref_ = std::ref(model_setting_);
 
       is_active_ = true;
     }
@@ -533,3 +595,21 @@ VALUE_TYPE dstree::Filter::get_node_summarization_pruning_frequency() const {
 
   return static_cast<VALUE_TYPE>(pruned_counter) / static_cast<VALUE_TYPE>(lb_distances_.size());
 }
+
+VALUE_TYPE upcite::dstree::Filter::get_valid_pruning_ratio() const {
+  ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
+  ID_TYPE num_valid_examples = train_size_ - num_train_examples;
+  ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+
+  VALUE_TYPE abs_error_interval = get_abs_error_interval();
+  ID_TYPE pruned_counter = 0;
+
+  for (ID_TYPE example_i = num_train_examples; example_i < num_train_examples + num_conformal_examples; ++example_i) {
+    if (pred_distances_[example_i] - abs_error_interval > bsf_distances_[example_i]) {
+      pruned_counter += 1;
+    }
+  }
+
+  return static_cast<VALUE_TYPE>(pruned_counter) / num_conformal_examples;
+}
+

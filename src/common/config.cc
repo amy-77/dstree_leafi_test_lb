@@ -91,7 +91,11 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_conformal_adjust_confidence_by_recall_(false),
     filter_conformal_is_smoothen_(false),
     filter_conformal_smoothen_method_("spline"),
-    filter_conformal_smoothen_core_("steffen") {
+    filter_conformal_smoothen_core_("steffen"),
+    filter_trial_confidence_level_(0.95),
+    filter_trial_iterations_(10000),
+    filter_trial_nnode_(32),
+    filter_trial_filter_preselection_size_threshold_(100) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -223,7 +227,19 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Filter conformal smoothening method (default: spline)")
       ("filter_conformal_smoothen_core",
        po::value<std::string>(&filter_conformal_smoothen_core_)->default_value("steffen"),
-       "Filter conformal smoothening method (default: steffen; options: cubic)");
+       "Filter conformal smoothening method (default: steffen; options: cubic)")
+      ("filter_trial_confidence_level",
+       po::value<VALUE_TYPE>(&filter_trial_confidence_level_)->default_value(0.95),
+       "Filter conformal confidence level for allocator trial runs (default: 0.95)")
+      ("filter_trial_iterations",
+       po::value<ID_TYPE>(&filter_trial_iterations_)->default_value(10000),
+       "Filter no. queries for model speed test (default: 10000)")
+      ("filter_trial_filter_preselection_size_threshold",
+       po::value<ID_TYPE>(&filter_trial_filter_preselection_size_threshold_)->default_value(100),
+       "Filter size threshold to run trials (default: 100)")
+      ("filter_trial_nnode",
+       po::value<ID_TYPE>(&filter_trial_nnode_)->default_value(32),
+       "Filter size threshold to run trials (default: 32)");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -527,4 +543,6 @@ void dstree::Config::log() {
   spdlog::info("filter_conformal_is_smoothen = {:b}", filter_conformal_is_smoothen_);
   spdlog::info("filter_conformal_smoothen_method = {:s}", filter_conformal_smoothen_method_);
   spdlog::info("filter_conformal_smoothen_core = {:s}", filter_conformal_smoothen_core_);
+
+  spdlog::info("filter_trial_confidence_level = {:.6f}", filter_trial_confidence_level_);
 }

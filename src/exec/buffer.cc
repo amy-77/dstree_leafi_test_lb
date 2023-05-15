@@ -29,7 +29,7 @@ dstree::Buffer::Buffer(bool is_on_disk,
     filepath_(std::move(filepath)),
     size_(0),
     next_series_id_(0) {
-  offsets_.reserve(capacity_);
+  offsets_.reserve(16);
 }
 
 dstree::Buffer::~Buffer() {
@@ -93,7 +93,6 @@ RESPONSE dstree::Buffer::reset() {
 }
 
 RESPONSE dstree::Buffer::insert(ID_TYPE offset) {
-//                                const std::shared_ptr<upcite::Logger> &logger) {
   // TODO explicitly managing ID_TYPE * resulted in unexpected change of values in the middle
   offsets_.push_back(offset);
   size_ += 1;
@@ -145,8 +144,14 @@ RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
   size_ = 0;
 
   if (if_remove_cache) {
-    offsets_.shrink_to_fit();
+//    offsets_.shrink_to_fit();
+    std::vector<ID_TYPE>().swap(offsets_);
     capacity_ = 0;
+
+    if (local_buffer_ != nullptr) {
+      free(local_buffer_);
+      local_buffer_ = nullptr;
+    }
   }
 
   return SUCCESS;

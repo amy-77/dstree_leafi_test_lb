@@ -18,7 +18,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #set(CONFIG_LIB_CPLUSPLUS ON)
 #set(CONFIG_NEWLIB_LIBC ON)
 
-find_package(Boost 1.80.0 COMPONENTS program_options log log_setup filesystem system REQUIRED)
+find_package(Boost COMPONENTS math_c99 program_options filesystem system REQUIRED)
+find_package(GSL REQUIRED)
 
 list(APPEND CMAKE_MODULE_PATH "$ENV{LIBTORCH_ROOT}/share/cmake/Torch")
 list(APPEND CMAKE_PREFIX_PATH "$ENV{LIBTORCH_ROOT}/share/cmake/Torch")
@@ -29,6 +30,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
 include_directories(
         ${Boost_INCLUDE_DIRS}
+        ${GSL_INCLUDE_DIRS}
         ${TORCH_INCLUDE_DIRS}
         src/common
         src/util
@@ -56,4 +58,4 @@ target_link_libraries(${TARGET}
 
 install(TARGETS ${TARGET} DESTINATION ${PROJECT_SOURCE_DIR}/bin)
 
-#add_subdirectory(test) # not updated
+#add_subdirectory(test)

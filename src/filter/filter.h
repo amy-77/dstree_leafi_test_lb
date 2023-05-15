@@ -53,16 +53,28 @@ class Filter {
   RESPONSE load(std::ifstream &node_ifs, void *ifs_buf);
 
   ID_TYPE get_id() const { return id_; };
-  VALUE_TYPE get_external_pruning_frequency() const;
+  VALUE_TYPE get_node_summarization_pruning_frequency() const;
   VALUE_TYPE get_nn_distance(ID_TYPE pos) const { return nn_distances_[pos]; };
   VALUE_TYPE get_bsf_distance(ID_TYPE pos) const { return bsf_distances_[pos]; };
   VALUE_TYPE get_pred_distance(ID_TYPE pos) const { return pred_distances_[pos]; };
-  VALUE_TYPE get_confidence_half_interval_by_pos(ID_TYPE pos) const {
+
+  VALUE_TYPE get_abs_error_interval() const {
+    return conformal_predictor_->get_alpha();
+  };
+
+  VALUE_TYPE get_abs_error_interval_by_pos(ID_TYPE pos) const {
     return conformal_predictor_->get_alpha_by_pos(pos);
   };
-  RESPONSE set_confidence_half_interval_by_pos(ID_TYPE pos) {
-    conformal_predictor_->set_alpha_by_pos(pos);
-    return SUCCESS;
+  RESPONSE set_abs_error_interval_by_pos(ID_TYPE pos) {
+    return conformal_predictor_->set_alpha_by_pos(pos);
+  };
+
+  RESPONSE fit_filter_conformal_spline(std::vector<ERROR_TYPE> &recalls) {
+    return conformal_predictor_->fit_spline(config_.get().filter_conformal_smoothen_core_, recalls);
+  }
+
+  RESPONSE set_abs_error_interval_by_recall(VALUE_TYPE recall) {
+    return conformal_predictor_->set_alpha_by_recall(recall);
   };
 
  private:

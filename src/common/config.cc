@@ -79,7 +79,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     load_filters_folderpath_(""),
     load_data_folderpath_(""),
     filter_is_conformal_(false),
-    filter_conformal_core_type_("histogram"),
+    filter_conformal_core_type_("discrete"),
     filter_conformal_confidence_(-1),
     filter_conformal_default_confidence_(0.95),
     filter_conformal_train_val_split_(0.9),
@@ -87,8 +87,11 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_model_setting_str_(""),
     filter_candidate_settings_filepath_(""),
     filter_allocate_is_gain_(false),
-    filter_conformal_recall_(-1) ,
-    filter_conformal_adjust_confidence_by_recall_(false) {
+    filter_conformal_recall_(-1),
+    filter_conformal_adjust_confidence_by_recall_(false),
+    filter_conformal_is_smoothen_(false),
+    filter_conformal_smoothen_method_("spline"),
+    filter_conformal_smoothen_core_("steffen") {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -195,14 +198,15 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Index load root folderpath")
       ("filter_is_conformal", po::bool_switch(&filter_is_conformal_)->default_value(false),
        "Whether to use conformal filters")
-      ("filter_conformal_core_type", po::value<std::string>(&filter_conformal_core_type_)->default_value("histogram"),
-       "Filter conformal core type (histogram, mlp; defaults: histogram)")
+      ("filter_conformal_core_type", po::value<std::string>(&filter_conformal_core_type_)->default_value("discrete"),
+       "Filter conformal core type (discrete, spline (i.e., smoothened); defaults: discrete)")
       ("filter_conformal_confidence", po::value<VALUE_TYPE>(&filter_conformal_confidence_)->default_value(-1),
        "Filter conformal confidence level ([0, 1])")
       ("filter_conformal_train_val_split",
        po::value<VALUE_TYPE>(&filter_conformal_train_val_split_)->default_value(0.9),
        "Filter conformal train/val split ratio")
-      ("filter_max_gpu_memory_mb", po::value<VALUE_TYPE>(&filter_max_gpu_memory_mb_)->default_value(constant::MAX_VALUE),
+      ("filter_max_gpu_memory_mb",
+       po::value<VALUE_TYPE>(&filter_max_gpu_memory_mb_)->default_value(constant::MAX_VALUE),
        "Filter max gpu memory to be used")
       ("filter_model_setting", po::value<std::string>(&filter_model_setting_str_),
        "Filter model setting string")
@@ -211,7 +215,15 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("filter_allocate_is_gain", po::bool_switch(&filter_allocate_is_gain_)->default_value(false),
        "Whether to allocate filters based on the expected runtime gain (default: false, i.e., by size)")
       ("filter_conformal_recall", po::value<VALUE_TYPE>(&filter_conformal_recall_)->default_value(-1),
-       "Filter conformal recall level ([0, 1])");
+       "Filter conformal recall level ([0, 1])")
+      ("filter_conformal_is_smoothened", po::bool_switch(&filter_conformal_is_smoothen_)->default_value(false),
+       "Whether to use smoothened conformal models")
+      ("filter_conformal_smoothen_method",
+       po::value<std::string>(&filter_conformal_smoothen_method_)->default_value("spline"),
+       "Filter conformal smoothening method (default: spline)")
+      ("filter_conformal_smoothen_core",
+       po::value<std::string>(&filter_conformal_smoothen_core_)->default_value("steffen"),
+       "Filter conformal smoothening method (default: steffen; options: cubic)");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -510,5 +522,9 @@ void dstree::Config::log() {
   spdlog::info("filter_allocate_is_gain = {:b}", filter_allocate_is_gain_);
 
   spdlog::info("filter_conformal_adjust_confidence_by_recall = {:b}", filter_conformal_adjust_confidence_by_recall_);
-  spdlog::info("filter_conformal_recall = {:.2f}", filter_conformal_recall_);
+  spdlog::info("filter_conformal_recall = {:.6f}", filter_conformal_recall_);
+
+  spdlog::info("filter_conformal_is_smoothen = {:b}", filter_conformal_is_smoothen_);
+  spdlog::info("filter_conformal_smoothen_method = {:s}", filter_conformal_smoothen_method_);
+  spdlog::info("filter_conformal_smoothen_core = {:s}", filter_conformal_smoothen_core_);
 }

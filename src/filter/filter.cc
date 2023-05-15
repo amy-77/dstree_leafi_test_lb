@@ -259,7 +259,12 @@ RESPONSE dstree::Filter::train() {
 
     if (config_.get().filter_is_conformal_) {
       ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
-      auto residuals = upcite::make_reserved<VALUE_TYPE>(num_conformal_examples);
+      auto residuals = upcite::make_reserved<ERROR_TYPE>(num_conformal_examples + 2);
+
+      // residuals with two sentries, i.e., 0 and max_pred_distance
+      residuals.push_back(0);
+      residuals.push_back(*std::max_element(std::begin(pred_distances_) + num_train_examples,
+                                            std::begin(pred_distances_) + num_train_examples + num_conformal_examples));
 
       for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
         // TODO torch::Tensor to ptr is not stable
@@ -272,30 +277,6 @@ RESPONSE dstree::Filter::train() {
       }
 
       conformal_predictor_->fit(residuals);
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-      spdlog::info(
-          "filter {:d} stream {:d} conformal confidence (one side-)interval {:.3f}@0.50, {:.3f}@0.90, {:.3f}@0.95, {:.3f}@0.99",
-          stream_id,
-          id_,
-          conformal_predictor_->get_alpha(0.5),
-          conformal_predictor_->get_alpha(0.9),
-          conformal_predictor_->get_alpha(0.95),
-          conformal_predictor_->get_alpha(0.99));
-
-      if (!upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.5)) &&
-          !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.9)) &&
-          !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.95)) &&
-          !upcite::is_equal(config_.get().filter_conformal_confidence_, static_cast<VALUE_TYPE>(0.99))) {
-        spdlog::info("filter {:d} stream {:d} conformal confidence (one side-)interval {:.3f}@{:.3f}",
-                     stream_id,
-                     id_,
-                     conformal_predictor_->get_alpha(config_.get().filter_conformal_confidence_),
-                     config_.get().filter_conformal_confidence_);
-      }
-#endif
-#endif
     }
 
 #ifdef DEBUG
@@ -538,7 +519,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   return SUCCESS;
 }
 
-VALUE_TYPE dstree::Filter::get_external_pruning_frequency() const {
+VALUE_TYPE dstree::Filter::get_node_summarization_pruning_frequency() const {
   if (lb_distances_.empty() || lb_distances_.size() != bsf_distances_.size()) {
     return 0;
   }

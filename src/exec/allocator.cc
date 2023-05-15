@@ -12,7 +12,8 @@ namespace dstree = upcite::dstree;
 
 dstree::Allocator::Allocator(dstree::Config &config,
                              ID_TYPE nfilters) :
-    config_(config) {
+    config_(config),
+    is_recall_calculated_(false) {
   cpu_sps_ = -1;
 
   // TODO test overhead
@@ -122,113 +123,107 @@ RESPONSE dstree::Allocator::assign() {
 }
 
 RESPONSE dstree::Allocator::set_confidence_from_recall() {
-  auto num_train_examples =
-      static_cast<ID_TYPE>(config_.get().filter_train_nexample_ * config_.get().filter_train_val_split_);
-  ID_TYPE num_valid_examples = config_.get().filter_train_nexample_ - num_train_examples;
-  ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+  if (!is_recall_calculated_) {
+    auto num_train_examples =
+        static_cast<ID_TYPE>(config_.get().filter_train_nexample_ * config_.get().filter_train_val_split_);
+    ID_TYPE num_valid_examples = config_.get().filter_train_nexample_ - num_train_examples;
+    ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
 
-  auto nn_distances = upcite::make_reserved<VALUE_TYPE>(num_conformal_examples);
-  auto nn_filter_ids = upcite::make_reserved<ID_TYPE>(num_conformal_examples);
+    auto nn_distances = upcite::make_reserved<VALUE_TYPE>(num_conformal_examples);
+    auto nn_filter_ids = upcite::make_reserved<ID_TYPE>(num_conformal_examples);
 
-  for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
-    nn_distances[i] = constant::MAX_VALUE;
-  }
-
-  for (ID_TYPE query_i = 0; query_i < num_conformal_examples; ++query_i) {
-    for (ID_TYPE filter_i = 0; filter_i < filter_infos_.size(); ++filter_i) {
-//    if (filter_infos_[i].node_.get().has_active_filter()) { // nn should be searched from all nodes
-      VALUE_TYPE local_nn = filter_infos_[filter_i].node_.get().get_filter_nn_distance(num_train_examples + query_i);
-
-      if (local_nn < nn_distances[query_i]) {
-        nn_distances[query_i] = local_nn;
-        nn_filter_ids[query_i] = filter_i;
-      }
+    for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
+      nn_distances[i] = constant::MAX_VALUE;
     }
-  }
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-  spdlog::debug("allocator nn_distances = {:s}",
-                    upcite::array2str(nn_distances.data(), num_conformal_examples));
-  spdlog::debug("allocator nn_filter_ids = {:s}",
-                upcite::array2str(nn_filter_ids.data(), num_conformal_examples));
-
-  for (ID_TYPE query_i = 0; query_i < num_conformal_examples; ++query_i) {
-    spdlog::debug("allocator query_i {:d} nn {:.5f} filter_i {:d} filter_nn {:.5f} filter_bsf {:.5f} filter_pred {:.5f}",
-                  query_i,
-                  nn_distances[query_i],
-                  nn_filter_ids[query_i],
-                  filter_infos_[nn_filter_ids[query_i]].node_.get().get_filter_nn_distance(num_train_examples + query_i),
-                  filter_infos_[nn_filter_ids[query_i]].node_.get().get_filter_bsf_distance(num_train_examples + query_i),
-                  filter_infos_[nn_filter_ids[query_i]].node_.get().get_filter_pred_distance(num_train_examples + query_i)
-                  );
-  }
-#endif
-#endif
-
-  VALUE_TYPE target_recall_level = config_.get().filter_conformal_recall_;
-  VALUE_TYPE current_recall = 1, last_recall = 1;
-  ID_TYPE last_pos = num_conformal_examples;
-
-  for (ID_TYPE confidence_pos = num_conformal_examples - 1; confidence_pos >= 0; --confidence_pos) {
-    ID_TYPE miss_count = 0;
 
     for (ID_TYPE query_i = 0; query_i < num_conformal_examples; ++query_i) {
-      std::reference_wrapper<dstree::Node> target_node = filter_infos_[nn_filter_ids[query_i]].node_;
+      for (ID_TYPE filter_i = 0; filter_i < filter_infos_.size(); ++filter_i) {
+//    if (filter_infos_[i].node_.get().has_active_filter()) { // nn should be searched from all nodes
+        VALUE_TYPE local_nn = filter_infos_[filter_i].node_.get().get_filter_nn_distance(num_train_examples + query_i);
 
-      VALUE_TYPE confidence_half_interval =
-          target_node.get().get_filter_confidence_half_interval_by_pos(confidence_pos);
-
-      VALUE_TYPE bsf_distance = target_node.get().get_filter_bsf_distance(num_train_examples + query_i);
-      VALUE_TYPE pred_distance = target_node.get().get_filter_pred_distance(num_train_examples + query_i);
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-        spdlog::debug("allocator confdn {:d} query {:d} node {:d} nn {:.7f} bsf {:.7f} pred {:.7f} intvl {:.7f}",
-                      confidence_pos,
-                      query_i,
-                      target_node.get().get_id(),
-                      target_node.get().get_filter_nn_distance(num_train_examples + query_i),
-                      bsf_distance,
-                      pred_distance,
-                      confidence_half_interval);
-#endif
-#endif
-
-      if (pred_distance - confidence_half_interval > bsf_distance) {
-        miss_count += 1;
+        if (local_nn < nn_distances[query_i]) {
+          nn_distances[query_i] = local_nn;
+          nn_filter_ids[query_i] = filter_i;
+        }
       }
     }
 
-    current_recall = static_cast<VALUE_TYPE>(num_conformal_examples - miss_count) / num_conformal_examples;
+    // two sentry points: recall at small error (recall_at_0_error, 0_error), recall at large error (0.999999, 42)
+    validation_recalls_.reserve(num_conformal_examples + 2);
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-    spdlog::debug("allocator required recall {:.2f} reached {:.3f} with confidence {:.3f} ({:d}/{:d})",
-               target_recall_level, current_recall,
-               static_cast<VALUE_TYPE>(confidence_pos + 1) / num_conformal_examples,
-               confidence_pos + 1, num_conformal_examples);
-#endif
-#endif
+    // recall at validation error intervals
+    for (ID_TYPE sorted_error_i = 0; sorted_error_i < num_conformal_examples + 2; ++sorted_error_i) {
+      ID_TYPE hit_count = 0;
 
-    if (current_recall < target_recall_level) {
-      break;
-    } else {
-      last_recall = current_recall;
-      last_pos = confidence_pos;
+      for (ID_TYPE query_i = 0; query_i < num_conformal_examples; ++query_i) {
+        std::reference_wrapper<dstree::Node> target_node = filter_infos_[nn_filter_ids[query_i]].node_;
+
+        VALUE_TYPE abs_error_interval = target_node.get().get_filter_abs_error_interval_by_pos(sorted_error_i);
+
+        VALUE_TYPE bsf_distance = target_node.get().get_filter_bsf_distance(num_train_examples + query_i);
+        VALUE_TYPE pred_distance = target_node.get().get_filter_pred_distance(num_train_examples + query_i);
+
+        if (pred_distance - abs_error_interval <= bsf_distance) {
+          hit_count += 1;
+        }
+      }
+
+      validation_recalls_.push_back(static_cast<ERROR_TYPE>(hit_count) / num_conformal_examples);
+    }
+
+    // to adjust the recalls to be strictly increasing
+    validation_recalls_[validation_recalls_.size() - 1] = 1 - constant::EPSILON_GAP;
+    for (ID_TYPE backtrace_i = validation_recalls_.size() - 2; backtrace_i >= 0; --backtrace_i) {
+      if (validation_recalls_[backtrace_i] > validation_recalls_[backtrace_i + 1] - constant::EPSILON_GAP) {
+        validation_recalls_[backtrace_i] = validation_recalls_[backtrace_i + 1] - constant::EPSILON_GAP;
+      }
+    }
+
+    spdlog::debug("allocator recalls = {:s}",
+                  upcite::array2str(validation_recalls_.data(), validation_recalls_.size()));
+
+    is_recall_calculated_ = true;
+
+    if (config_.get().filter_conformal_is_smoothen_) {
+      for (auto &filter_info : filter_infos_) {
+        if (filter_info.node_.get().has_active_filter()) {
+          filter_info.node_.get().fit_filter_conformal_spline(validation_recalls_);
+        }
+      }
     }
   }
 
-  // training pruning ratio could be calculated from the log
-  spdlog::info("allocator reached recall {:.3f} with confidence {:.3f} ({:d}/{:d})",
-               last_recall,
-               static_cast<VALUE_TYPE>(last_pos + 1) / num_conformal_examples,
-               last_pos + 1,
-               num_conformal_examples);
+  if (config_.get().filter_conformal_is_smoothen_) {
+    for (auto &filter_info : filter_infos_) {
+      if (filter_info.node_.get().has_active_filter()) {
+        filter_info.node_.get().set_filter_abs_error_interval_by_recall(config_.get().filter_conformal_recall_);
 
-  for (auto &filter_info : filter_infos_) {
-    if (filter_info.node_.get().has_active_filter()) {
-      filter_info.node_.get().set_filter_confidence_half_interval_by_pos(last_pos);
+        spdlog::info("allocator node {:d} abs_error {:.3f} at {:.4f}",
+                     filter_info.node_.get().get_id(),
+                     filter_info.node_.get().get_filter_abs_error_interval(),
+                     config_.get().filter_conformal_recall_);
+      }
+    }
+  } else {
+    ID_TYPE last_recall_i = validation_recalls_.size() - 1;
+
+    for (ID_TYPE recall_i = validation_recalls_.size() - 2; recall_i >= 0; --recall_i) {
+      if (validation_recalls_[recall_i] < config_.get().filter_conformal_recall_) {
+        last_recall_i = recall_i + 1;
+
+        spdlog::info("allocator reached recall {:.3f} with error_i {:.3f} ({:d}/{:d}, 2 sentries included)",
+                     validation_recalls_[last_recall_i],
+                     static_cast<VALUE_TYPE>(last_recall_i) / validation_recalls_.size(),
+                     last_recall_i,
+                     validation_recalls_.size());
+        break;
+      }
+    }
+
+    for (auto &filter_info : filter_infos_) {
+      if (filter_info.node_.get().has_active_filter()) {
+        filter_info.node_.get().set_filter_abs_error_interval_by_pos(last_recall_i);
+      }
     }
   }
 

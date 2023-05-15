@@ -11,12 +11,13 @@
 
 #include "global.h"
 #include "interval.h"
+#include <gsl/gsl_spline.h>
 
 namespace upcite {
 
 enum CONFORMAL_CORE {
-  HISTOGRAM = 0,
-  MLMODEL = 1
+  DISCRETE = 0,
+  SPLINE = 1 // smoothened
 };
 
 class ConformalPredictor {
@@ -24,7 +25,8 @@ class ConformalPredictor {
   ConformalPredictor() : is_fitted_(false) {};
   ~ConformalPredictor() = default;
 
-  VALUE_TYPE get_alpha(VALUE_TYPE confidence) const;
+  VALUE_TYPE get_alpha() const;
+
   VALUE_TYPE get_alpha_by_pos(ID_TYPE pos) const;
   RESPONSE set_alpha_by_pos(ID_TYPE pos);
 
@@ -35,11 +37,12 @@ class ConformalPredictor {
   bool is_fitted_;
   CONFORMAL_CORE core_;
 
-  VALUE_TYPE confidence_;
-  ID_TYPE confidence_id_;
+  VALUE_TYPE confidence_level_;
+  ID_TYPE abs_error_i_;
   VALUE_TYPE alpha_;
 
-  std::vector<VALUE_TYPE> alphas_;
+  std::vector<ERROR_TYPE> alphas_;
+
 };
 
 class ConformalRegressor : public ConformalPredictor {
@@ -47,22 +50,27 @@ class ConformalRegressor : public ConformalPredictor {
   explicit ConformalRegressor(std::string core_type_str, VALUE_TYPE confidence);
   ~ConformalRegressor() = default;
 
-  RESPONSE fit(std::vector<VALUE_TYPE> &residuals);
-//               std::vector<VALUE_TYPE> &sigmas,
-//               std::vector<ID_TYPE> &bins);
+  RESPONSE set_alpha_by_recall(VALUE_TYPE recall);
+
+  RESPONSE fit(std::vector<ERROR_TYPE> &residuals);
+//               std::vector<VALUE_TYPE> &sigmas, std::vector<ID_TYPE> &bins);
+
+  RESPONSE fit_spline(std::string &spline_core, std::vector<ERROR_TYPE> &recalls);
 
   INTERVAL predict(VALUE_TYPE y_hat,
-                   VALUE_TYPE confidence = -1,
+                   VALUE_TYPE confidence_level = -1,
                    VALUE_TYPE y_max = constant::MAX_VALUE,
                    VALUE_TYPE y_min = constant::MIN_VALUE);
 
   std::vector<INTERVAL> predict(std::vector<VALUE_TYPE> &y_hat,
-//                                  std::vector<VALUE_TYPE> &sigmas,
-//                                  std::vector<ID_TYPE> &bins,
-                                VALUE_TYPE confidence = -1,
+//                                  std::vector<VALUE_TYPE> &sigmas, std::vector<ID_TYPE> &bins,
+                                VALUE_TYPE confidence_level = -1,
                                 VALUE_TYPE y_max = constant::MAX_VALUE,
                                 VALUE_TYPE y_min = constant::MIN_VALUE);
 
+ private:
+  std::unique_ptr<gsl_interp_accel> gsl_accel_;
+  std::unique_ptr<gsl_spline> gsl_spline_;
 };
 
 }

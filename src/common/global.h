@@ -16,6 +16,8 @@
 
 typedef int64_t ID_TYPE;
 typedef float VALUE_TYPE;
+// match GSL and avoid extra conversions
+typedef double ERROR_TYPE;
 
 constexpr auto TORCH_VALUE_TYPE = torch::kFloat32;
 
@@ -28,6 +30,7 @@ namespace upcite {
 namespace constant {
 
 const VALUE_TYPE EPSILON = 1e-5;
+const VALUE_TYPE EPSILON_GAP = 1e-4;
 
 const VALUE_TYPE MIN_VALUE = -1e6;
 const VALUE_TYPE MAX_VALUE = 1e6;

@@ -23,12 +23,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #
 #install(TARGETS ${TEST_SIMD} DESTINATION ${CMAKE_SOURCE_DIR}/bin)
 
-set(TEST_TENSOR test_tensor)
+#set(TEST_TENSOR test_tensor)
+#
+#add_executable(${TEST_TENSOR} test_tensor.cc logger.cc)
+#set_property(TARGET ${TEST_TENSOR} PROPERTY CXX_STANDARD 14)
+#
+#target_compile_features(${TEST_TENSOR} PRIVATE cxx_std_14)
+#target_link_libraries(${TEST_TENSOR} PRIVATE exec common util spdlog::spdlog ${TORCH_LIBRARIES})
+#
+#install(TARGETS ${TEST_TENSOR} DESTINATION ${CMAKE_SOURCE_DIR}/bin)
 
-add_executable(${TEST_TENSOR} test_tensor.cc logger.cc)
-set_property(TARGET ${TEST_TENSOR} PROPERTY CXX_STANDARD 14)
+set(TEST_SPLINE test_gsl_spline)
 
-target_compile_features(${TEST_TENSOR} PRIVATE cxx_std_14)
-target_link_libraries(${TEST_TENSOR} PRIVATE exec common util spdlog::spdlog ${TORCH_LIBRARIES})
+add_executable(${TEST_SPLINE} test_gsl_spline.cc)
+set_property(TARGET ${TEST_SPLINE} PROPERTY CXX_STANDARD 14)
 
-install(TARGETS ${TEST_TENSOR} DESTINATION ${CMAKE_SOURCE_DIR}/bin)
+target_compile_features(${TEST_SPLINE} PRIVATE cxx_std_14)
+
+target_link_libraries(${TEST_SPLINE} PRIVATE GSL::gsl GSL::gslcblas)
+
+install(TARGETS ${TEST_SPLINE} DESTINATION ${CMAKE_SOURCE_DIR}/bin)

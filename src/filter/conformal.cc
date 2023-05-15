@@ -13,45 +13,71 @@
 #include "vec.h"
 
 upcite::ConformalRegressor::ConformalRegressor(std::string core_type_str,
-                                               VALUE_TYPE confidence) {
-  if (core_type_str == "histogram") {
-    core_ = HISTOGRAM;
-  } else if (core_type_str == "mlp") {
-    spdlog::error("conformal core {:s} is not implemented; roll back to the default HISTOGRAM",
-                  core_type_str);
-//    core_ = MLMODEL;
-    core_ = HISTOGRAM;
+                                               VALUE_TYPE confidence) :
+    gsl_accel_(nullptr),
+    gsl_spline_(nullptr) {
+  if (core_type_str == "discrete") {
+    core_ = DISCRETE;
+  } else if (core_type_str == "spline") {
+    core_ = SPLINE;
   } else {
-    spdlog::error("conformal core {:s} is not recognized; roll back to the default HISTOGRAM",
+    spdlog::error("conformal core {:s} is not recognized; roll back to the default: discrete",
                   core_type_str);
+    core_ = DISCRETE;
   }
 
-  confidence_ = confidence;
+  confidence_level_ = confidence;
 }
 
-RESPONSE upcite::ConformalRegressor::fit(std::vector<VALUE_TYPE> &residuals) {
+RESPONSE upcite::ConformalRegressor::fit(std::vector<ERROR_TYPE> &residuals) {
   alphas_.assign(residuals.begin(), residuals.end());
   for (auto &residual : alphas_) { residual = residual < 0 ? -residual : residual; }
 
   std::sort(alphas_.begin(), alphas_.end()); //non-decreasing
 
-  is_fitted_ = true;
+  if (core_ == DISCRETE) {
+    is_fitted_ = true;
 
-  confidence_id_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence_);
-  alpha_ = alphas_[confidence_id_];
+    abs_error_i_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence_level_);
+    alpha_ = alphas_[abs_error_i_];
+  } else { // core_ == SPLINE
+    // fit later with recalls as input
+    is_fitted_ = false;
+  }
+
+  return SUCCESS;
+}
+
+RESPONSE upcite::ConformalRegressor::fit_spline(std::string &spline_core, std::vector<ERROR_TYPE> &recalls) {
+  assert(recalls.size() == alphas_.size());
+  gsl_accel_ = std::unique_ptr<gsl_interp_accel>(gsl_interp_accel_alloc());
+
+  if (spline_core == "steffen") {
+    gsl_spline_ = std::unique_ptr<gsl_spline>(gsl_spline_alloc(gsl_interp_steffen, recalls.size()));
+  } else if (spline_core == "cubic") {
+    gsl_spline_ = std::unique_ptr<gsl_spline>(gsl_spline_alloc(gsl_interp_cspline, recalls.size()));
+  } else {
+    spdlog::error("conformal spline core {:s} is not recognized; roll back to the default: steffen", spline_core);
+
+    gsl_spline_ = std::unique_ptr<gsl_spline>(gsl_spline_alloc(gsl_interp_steffen, recalls.size()));
+  }
+
+  gsl_spline_init(gsl_spline_.get(), recalls.data(), alphas_.data(), recalls.size());
+
+  is_fitted_ = true;
 
   return SUCCESS;
 }
 
 upcite::INTERVAL upcite::ConformalRegressor::predict(VALUE_TYPE y_hat,
-                                                     VALUE_TYPE confidence,
+                                                     VALUE_TYPE confidence_level,
                                                      VALUE_TYPE y_max,
                                                      VALUE_TYPE y_min) {
   if (is_fitted_) {
-    if (confidence >= 0 && !upcite::is_equal(confidence_, confidence)) {
-      confidence_id_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence);
-      alpha_ = alphas_[confidence_id_];
-      confidence_ = confidence;
+    if (confidence_level >= 0 && !upcite::is_equal(confidence_level_, confidence_level)) {
+      abs_error_i_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence_level);
+      alpha_ = alphas_[abs_error_i_];
+      confidence_level_ = confidence_level;
     }
 
     return {y_hat - alpha_, y_hat + alpha_};
@@ -61,13 +87,13 @@ upcite::INTERVAL upcite::ConformalRegressor::predict(VALUE_TYPE y_hat,
 }
 
 std::vector<upcite::INTERVAL> upcite::ConformalRegressor::predict(std::vector<VALUE_TYPE> &y_hat,
-                                                                  VALUE_TYPE confidence,
+                                                                  VALUE_TYPE confidence_level,
                                                                   VALUE_TYPE y_max,
                                                                   VALUE_TYPE y_min) {
-  if (confidence >= 0 && confidence <= 1 && !upcite::is_equal(confidence_, confidence)) {
-    confidence_id_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence);
-    alpha_ = alphas_[confidence_id_];
-    confidence_ = confidence;
+  if (confidence_level >= 0 && confidence_level <= 1 && !upcite::is_equal(confidence_level_, confidence_level)) {
+    abs_error_i_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence_level);
+    alpha_ = alphas_[abs_error_i_];
+    confidence_level_ = confidence_level;
   }
 
   auto y_intervals = upcite::make_reserved<upcite::INTERVAL>(y_hat.size());
@@ -111,16 +137,9 @@ RESPONSE upcite::ConformalPredictor::load(std::ifstream &node_ifs, void *ifs_buf
   return SUCCESS;
 }
 
-VALUE_TYPE upcite::ConformalPredictor::get_alpha(VALUE_TYPE confidence) const {
+VALUE_TYPE upcite::ConformalPredictor::get_alpha() const {
   if (is_fitted_) {
-    if (confidence >= 0 && confidence <= 1) {
-      if (upcite::is_equal(confidence_, confidence)) {
-        return alpha_;
-      } else {
-        ID_TYPE confidence_id = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence);
-        return alphas_[confidence_id];
-      }
-    }
+    return alpha_;
   }
 
   return constant::MAX_VALUE;
@@ -141,4 +160,12 @@ RESPONSE upcite::ConformalPredictor::set_alpha_by_pos(ID_TYPE pos) {
   }
 
   return FAILURE;
+}
+
+RESPONSE upcite::ConformalRegressor::set_alpha_by_recall(VALUE_TYPE recall) {
+  assert(gsl_accel_ != nullptr && gsl_spline_ != nullptr);
+
+  alpha_ = gsl_spline_eval(gsl_spline_.get(), recall, gsl_accel_.get());
+
+  return SUCCESS;
 }

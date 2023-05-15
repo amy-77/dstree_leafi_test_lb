@@ -91,6 +91,9 @@ class Allocator {
   VALUE_TYPE available_gpu_memory_mb_;
 
   std::vector<FilterInfo> filter_infos_;
+
+  bool is_recall_calculated_;
+  std::vector<ERROR_TYPE> validation_recalls_;
 };
 
 } // namespace dstree

@@ -113,6 +113,10 @@ class Config {
   std::string filter_model_setting_str_;
   std::string filter_candidate_settings_filepath_;
   bool filter_allocate_is_gain_;
+
+  bool filter_conformal_is_smoothen_;
+  std::string filter_conformal_smoothen_method_;
+  std::string filter_conformal_smoothen_core_;
 };
 
 }

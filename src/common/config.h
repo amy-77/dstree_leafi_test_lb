@@ -122,6 +122,8 @@ class Config {
   ID_TYPE filter_trial_iterations_;
   ID_TYPE filter_trial_nnode_;
   ID_TYPE filter_trial_filter_preselection_size_threshold_;
+
+  ID_TYPE allocator_cpu_trial_iterations_;
 };
 
 }

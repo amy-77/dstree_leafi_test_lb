@@ -68,7 +68,8 @@ dstree::Filter::Filter(dstree::Config &config,
     is_trained_(false),
     is_distances_preprocessed_(false),
     is_distances_logged(false),
-    train_size_(0) {
+    train_size_(0),
+    model_setting_ref_(MODEL_SETTING_PLACEHOLDER_REF) {
 //  torch::Device device = torch::Device(c10::DeviceType::Lazy);
 
   if (config.filter_train_is_gpu_) {
@@ -346,7 +347,7 @@ RESPONSE dstree::Filter::train(bool is_trial) {
         duration.count() / static_cast<VALUE_TYPE>(config_.get().filter_trial_iterations_);
 
 #ifdef DEBUG
-    spdlog::info("model {:s} gpu mem = {:.3f}MB, time = {:.3f}ms",
+    spdlog::info("filter trial model {:s} gpu mem = {:.3f}MB, time = {:.6f}ms",
                  model_setting_ref_.get().model_setting_str,
                  model_setting_ref_.get().gpu_mem_mb,
                  model_setting_ref_.get().gpu_ms_per_series);

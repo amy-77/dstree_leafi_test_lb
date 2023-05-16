@@ -12,9 +12,9 @@
 
 namespace upcite {
 
-static VALUE_TYPE cal_EDsquare(const VALUE_TYPE *series_1_ptr,
-                               const VALUE_TYPE *series_2_ptr,
-                               ID_TYPE series_length) {
+static inline VALUE_TYPE cal_EDsquare(const VALUE_TYPE *series_1_ptr,
+                                      const VALUE_TYPE *series_2_ptr,
+                                      ID_TYPE series_length) {
   VALUE_TYPE distance_square = 0;
 
   series_length -= 1;
@@ -28,10 +28,10 @@ static VALUE_TYPE cal_EDsquare(const VALUE_TYPE *series_1_ptr,
   return distance_square;
 }
 
-static VALUE_TYPE cal_early_EDsquare(const VALUE_TYPE *series_1_ptr,
-                                     const VALUE_TYPE *series_2_ptr,
-                                     ID_TYPE series_length,
-                                     VALUE_TYPE bsf_distance) {
+static inline VALUE_TYPE cal_early_EDsquare(const VALUE_TYPE *series_1_ptr,
+                                            const VALUE_TYPE *series_2_ptr,
+                                            ID_TYPE series_length,
+                                            VALUE_TYPE bsf_distance) {
   VALUE_TYPE distance_square = 0;
 
   series_length -= 1;
@@ -49,10 +49,10 @@ static VALUE_TYPE cal_early_EDsquare(const VALUE_TYPE *series_1_ptr,
   return distance_square;
 }
 
-static VALUE_TYPE cal_EDsquare_SIMD_8(const VALUE_TYPE *series_1_ptr,
-                                      const VALUE_TYPE *series_2_ptr,
-                                      ID_TYPE series_length,
-                                      VALUE_TYPE *cache) {
+static inline VALUE_TYPE cal_EDsquare_SIMD_8(const VALUE_TYPE *series_1_ptr,
+                                             const VALUE_TYPE *series_2_ptr,
+                                             ID_TYPE series_length,
+                                             VALUE_TYPE *cache) {
   __m256 m256_square_cumulated = _mm256_setzero_ps(), m256_diff, m256_sum, m256_1, m256_2;
 
   for (ID_TYPE i = 0; i < series_length; i += 8) {
@@ -68,11 +68,11 @@ static VALUE_TYPE cal_EDsquare_SIMD_8(const VALUE_TYPE *series_1_ptr,
   return cache[0] + cache[4];
 }
 
-VALUE_TYPE cal_early_EDsquare_SIMD_8(const VALUE_TYPE *series_1_ptr,
-                                     const VALUE_TYPE *series_2_ptr,
-                                     ID_TYPE series_length,
-                                     VALUE_TYPE *cache,
-                                     VALUE_TYPE bsf_distance) {
+VALUE_TYPE inline cal_early_EDsquare_SIMD_8(const VALUE_TYPE *series_1_ptr,
+                                            const VALUE_TYPE *series_2_ptr,
+                                            ID_TYPE series_length,
+                                            VALUE_TYPE *cache,
+                                            VALUE_TYPE bsf_distance) {
   VALUE_TYPE partial_EDsquare = 0;
   __m256 m256_square, m256_diff, m256_sum, m256_1, m256_2;
 

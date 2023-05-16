@@ -8,6 +8,7 @@
 
 #include <vector>
 #include <map>
+#include <tuple>
 
 #include "global.h"
 #include "config.h"
@@ -25,8 +26,6 @@ struct FilterInfo {
     score = -1;
 
     external_pruning_probability_ = -1;
-    pruning_probability_ = -1;
-    false_pruning_probability_ = -1;
   };
   ~FilterInfo() = default;
 
@@ -35,12 +34,9 @@ struct FilterInfo {
 
   std::reference_wrapper<Node> node_;
 
-  // TODO collect these stats
   VALUE_TYPE external_pruning_probability_; // d_bsf < d_lb
-  // TODO diff: d_bsf < d_f when d_bsf >= d_lb vs. d_bsf < d_f
-  VALUE_TYPE pruning_probability_; // d_bsf < d_p
-  // TODO how to use false_pruning_probability_?
-  VALUE_TYPE false_pruning_probability_; // d_nn < d_bsf < d_p
+//  VALUE_TYPE pruning_probability_; // d_bsf < d_p
+//  VALUE_TYPE false_pruning_probability_; // d_nn < d_bsf < d_p
 };
 
 static bool compDecreFilterScore(dstree::FilterInfo &filter_info_1, dstree::FilterInfo &filter_info_2) {
@@ -59,9 +55,6 @@ class Allocator {
 
   RESPONSE push_instance(const FilterInfo &filter_info);
 
-  // TODO this is a combination optimization problem
-  // the current solution is to find the best model setting for each filter, and then pick the top filters
-  // ideally one filter with a slower but more accurate model might be replaced by two filters with faster but less accurate models
   RESPONSE assign();
 
   RESPONSE set_confidence_from_recall();
@@ -72,13 +65,8 @@ class Allocator {
 
   std::reference_wrapper<Config> config_;
 
-  VALUE_TYPE cpu_ms_per_series_;
+  double_t cpu_ms_per_series_;
 
-  // however performance of different combinations should be provided (or tested?)
-  // maybe select a subset of (e.g., 10) nodes, train all candidate models on these
-  // nodes, check (gpu) memory footprint, test speed and estimate accuracy
-  // number of nodes ~10^4
-  // number of trail trains: (#threads, or 16, say) * ~10 (should be a selected subset of all possible combinations)
   std::vector<MODEL_SETTING> candidate_model_settings_;
   VALUE_TYPE available_gpu_memory_mb_;
 
@@ -86,6 +74,16 @@ class Allocator {
 
   bool is_recall_calculated_;
   std::vector<ERROR_TYPE> validation_recalls_;
+
+  std::vector<ID_TYPE> filter_ids_;
+  std::vector<VALUE_TYPE> gains_matrix_;
+  std::vector<VALUE_TYPE> mem_matrix_;
+
+  // TODO memory is continuous instead of discrete
+//  std::unique_ptr<VALUE_TYPE> total_gain_matrix_;
+//  std::unique_ptr<bool> path_matrix_;
+  std::vector<std::vector<std::tuple<VALUE_TYPE, VALUE_TYPE>>> total_gain_matrix_;
+  std::vector<std::vector<ID_TYPE>> path_matrix_;
 };
 
 } // namespace dstree

@@ -22,7 +22,7 @@ struct FilterInfo {
  public:
   explicit FilterInfo(Node &node) :
       node_(node),
-      model_setting(MODEL_SETTING_PLACEHOLDER_REF) {
+      model_setting(upcite::MODEL_SETTING_PLACEHOLDER_REF) {
     score = -1;
 
     external_pruning_probability_ = -1;

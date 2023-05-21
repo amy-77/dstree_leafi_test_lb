@@ -289,19 +289,12 @@ void search_thread_F(const SearchCache &search_cache) {
       search_cache.leaf_min_heap_.get().pop();
 
       pthread_mutex_unlock(search_cache.leaf_pq_mutex_);
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-      pthread_mutex_lock(search_cache.leaf_pq_mutex_);
-      spdlog::info("filter query {:d} thread {:d} visit node {:d} before {:d} nodes",
-                  search_cache.query_id_,
-                  search_cache.thread_id_,
-                  node_to_visit.get().get_id(),
-                  search_cache.leaf_min_heap_.get().size());
-      pthread_mutex_unlock(search_cache.leaf_pq_mutex_);
-#endif
-#endif
     }
+
+    // for a more precise bsf distance
+    pthread_mutex_lock(search_cache.answer_mutex_);
+    local_bsf = search_cache.answer_->get_bsf();
+    pthread_mutex_unlock(search_cache.answer_mutex_);
 
     if (node_to_visit.get().has_filter()) {
       local_nn_distance = node_to_visit.get().search(
@@ -323,8 +316,6 @@ void search_thread_F(const SearchCache &search_cache) {
     if (local_nn_distance < local_bsf) {
       pthread_mutex_lock(search_cache.answer_mutex_);
       search_cache.answer_->push_bsf(local_nn_distance);
-
-      local_bsf = search_cache.answer_->get_bsf();
       pthread_mutex_unlock(search_cache.answer_mutex_);
 
 #ifdef DEBUG

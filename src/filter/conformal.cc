@@ -125,9 +125,11 @@ RESPONSE upcite::ConformalPredictor::load(std::ifstream &node_ifs, void *ifs_buf
 VALUE_TYPE upcite::ConformalPredictor::get_alpha() const {
   if (is_fitted_) {
     return alpha_;
+  } else if (is_trial_) {
+    return alpha_;
+  } else {
+    return constant::MAX_VALUE;
   }
-
-  return constant::MAX_VALUE;
 }
 
 RESPONSE upcite::ConformalPredictor::set_alpha(VALUE_TYPE alpha, bool is_trial) {

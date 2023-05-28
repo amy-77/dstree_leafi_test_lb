@@ -113,7 +113,7 @@ RESPONSE dstree::Index::insert(ID_TYPE batch_series_id) {
 RESPONSE dstree::Index::filter_initialize(dstree::Node &node,
                                           ID_TYPE *filter_id) {
   if (node.is_leaf()) {
-    node.implant_filter(*filter_id, filter_train_query_tsr_);
+    node.add_filter(*filter_id, filter_train_query_tsr_);
 
     filter_cache_.push(node.get_filter());
     *filter_id += 1;

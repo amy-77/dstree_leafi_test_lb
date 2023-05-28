@@ -45,7 +45,7 @@ struct TrialCache {
              ID_TYPE thread_id,
              at::cuda::CUDAStream stream,
              std::vector<upcite::MODEL_SETTING> &candidate_model_settings,
-             std::vector<dstree::FilterInfo> filter_infos,
+             std::vector<dstree::FilterInfo> &filter_infos,
              ID_TYPE trial_nnode,
              ID_TYPE trial_nmodel,
              std::vector<ID_TYPE> &sampled_filter_idx,
@@ -88,42 +88,116 @@ void trial_thread_F(TrialCache &trial_cache) {
   at::cuda::setCurrentCUDAStream(trial_cache.stream_);
   at::cuda::CUDAStreamGuard guard(trial_cache.stream_); // compiles with libtorch-gpu
 
+#ifdef DEBUG
+#ifndef DEBUGGED
+  spdlog::debug("allocator thread {:d}", trial_cache.thread_id_);
+  spdlog::debug("allocator candidate_model_settings_ref_.get().size() {:d}",
+                trial_cache.candidate_model_settings_ref_.get().size());
+  spdlog::debug("allocator filter_infos_ref_.get().size() {:d}", trial_cache.filter_infos_ref_.get().size());
+  spdlog::debug("allocator trial_nnode_ {:d}", trial_cache.trial_nnode_);
+  spdlog::debug("allocator trial_nmodel_ {:d}", trial_cache.trial_nmodel_);
+  spdlog::debug("allocator sampled_filter_idx_ref_.get().size() {:d}",
+                trial_cache.sampled_filter_idx_ref_.get().size());
+  spdlog::debug("allocator filter_pruning_ratios_ref_.get().size() {:d}",
+                trial_cache.filter_pruning_ratios_ref_.get().size());
+  spdlog::debug("allocator trial_sample_i_ {:d}", *trial_cache.trial_sample_i_ptr_);
+#endif
+#endif
+
   while (true) {
     pthread_mutex_lock(trial_cache.sample_idx_mutex_);
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+    spdlog::debug("allocator thread {:d} locked, *trial_cache.trial_sample_i_ptr_ = {:d}",
+                  trial_cache.thread_id_,
+                  *trial_cache.trial_sample_i_ptr_);
+#endif
+#endif
+
     if ((*trial_cache.trial_sample_i_ptr_) >= trial_cache.trial_nnode_) {
       pthread_mutex_unlock(trial_cache.sample_idx_mutex_);
 
       break;
     } else {
+      // iterate over nodes (check all models for this node)
+      // TODO iterate over sampled [node, model] pairs
       ID_TYPE trial_sample_i = *trial_cache.trial_sample_i_ptr_;
-      *trial_cache.trial_sample_i_ptr_ += 1;
+      *trial_cache.trial_sample_i_ptr_ = trial_sample_i + 1;
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+      spdlog::debug("allocator thread {:d} to unlock; trial_sample_i = {:d}, *trial_cache.trial_sample_i_ptr_ = {:d}",
+                    trial_cache.thread_id_,
+                    trial_sample_i,
+                    *trial_cache.trial_sample_i_ptr_);
+#endif
+#endif
+
       pthread_mutex_unlock(trial_cache.sample_idx_mutex_);
 
-      std::reference_wrapper<dstree::FilterInfo> filter_info = trial_cache.filter_infos_ref_.get()[trial_sample_i];
+      ID_TYPE filter_sample_pos = trial_cache.sampled_filter_idx_ref_.get()[trial_sample_i];
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+      spdlog::debug("allocator thread {:d} sampled_filter_id = {:d}",
+                    trial_cache.thread_id_, filter_sample_pos);
+#endif
+#endif
+
+      std::reference_wrapper<dstree::FilterInfo> filter_info = trial_cache.filter_infos_ref_.get()[filter_sample_pos];
       auto filter_ref = filter_info.get().node_.get().get_filter();
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+      spdlog::debug("allocator thread {:d} check node {:d}",
+                    trial_cache.thread_id_,
+                    filter_ref.get().get_id()
+      );
+#endif
+#endif
 
       for (ID_TYPE model_i = 0; model_i < trial_cache.trial_nmodel_; ++model_i) {
         auto &candidate_model_setting = trial_cache.candidate_model_settings_ref_.get()[model_i];
 
-        filter_ref.get().set_model(candidate_model_setting);
+#ifdef DEBUG
+#ifndef DEBUGGED
+        spdlog::debug("allocator thread {:d} check model {:s} on node {:d}",
+                      trial_cache.thread_id_,
+                      candidate_model_setting.model_setting_str,
+                      filter_ref.get().get_id()
+        );
+#endif
+#endif
+
+        filter_ref.get().trigger_trial(candidate_model_setting);
         filter_ref.get().train(true);
 
         // 2-d array of [no. models, no. nodes]
         trial_cache.filter_pruning_ratios_ref_.get()[trial_cache.trial_nnode_ * model_i + trial_sample_i] =
-            filter_ref.get().get_valid_pruning_ratio();
+            filter_ref.get().get_val_pruning_ratio();
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+        spdlog::debug("allocator thread {:d} node {:d} model {:d} pruning ratio = {:.3f}",
+                      trial_cache.thread_id_,
+                      trial_sample_i,
+                      model_i,
+                      trial_cache.filter_pruning_ratios_ref_.get()[trial_cache.trial_nnode_ * model_i + trial_sample_i]
+        );
+#endif
+#endif
       }
     }
   }
 }
 
 RESPONSE dstree::Allocator::trial_collect_mthread() {
-  // TODO test cpu_ms_per_series_
-
   std::sort(filter_infos_.begin(), filter_infos_.end(), dstree::compDecreFilterNSeries);
 
   ID_TYPE end_i_exclusive = filter_infos_.size();
-  while (end_i_exclusive > 0 && filter_infos_[end_i_exclusive].node_.get().get_size()
-      > config_.get().filter_trial_filter_preselection_size_threshold_) {
+  while (end_i_exclusive > 1 && filter_infos_[end_i_exclusive - 1].node_.get().get_size()
+      < config_.get().filter_trial_filter_preselection_size_threshold_) {
     end_i_exclusive -= 1;
   }
 
@@ -132,12 +206,16 @@ RESPONSE dstree::Allocator::trial_collect_mthread() {
 
   auto sampled_filter_idx = upcite::make_reserved<ID_TYPE>(config_.get().filter_trial_nnode_);
   for (ID_TYPE sample_i = 0; sample_i < config_.get().filter_trial_nnode_; ++sample_i) {
-    sampled_filter_idx.push_back(offset + sample_i + step);
+    sampled_filter_idx.push_back(offset + sample_i * step);
   }
 
   // 2-d array of [no. models, no. nodes]
   auto filter_pruning_ratios = upcite::make_reserved<VALUE_TYPE>(
       config_.get().filter_trial_nnode_ * candidate_model_settings_.size());
+
+  for (ID_TYPE i = 0; i < config_.get().filter_trial_nnode_ * candidate_model_settings_.size(); ++i) {
+    filter_pruning_ratios.push_back(0);
+  }
 
   std::vector<std::unique_ptr<TrialCache>> trial_caches;
   std::unique_ptr<pthread_mutex_t> sample_idx_mutex = std::make_unique<pthread_mutex_t>();
@@ -182,7 +260,10 @@ RESPONSE dstree::Allocator::trial_collect_mthread() {
   }
 
   spdlog::info("allocator sampled node ids = {:s}",
-                upcite::array2str(sampled_filter_ids.data(), sampled_filter_ids.size()));
+               upcite::array2str(sampled_filter_ids.data(), sampled_filter_ids.size()));
+#endif
+
+#ifdef DEBUG
   spdlog::info("allocator trial pruning ratios = {:s}",
                upcite::array2str(filter_pruning_ratios.data(), filter_pruning_ratios.size()));
 #endif
@@ -191,13 +272,14 @@ RESPONSE dstree::Allocator::trial_collect_mthread() {
     VALUE_TYPE mean = 0;
 
     for (ID_TYPE sample_i = 0; sample_i < sampled_filter_idx.size(); ++sample_i) {
+      // 2-d array of [no. models, no. nodes]
       mean += filter_pruning_ratios[sampled_filter_idx.size() * model_i + sample_i];
     }
 
     candidate_model_settings_[model_i].pruning_prob = mean / sampled_filter_idx.size();
 
 #ifdef DEBUG
-    spdlog::info("allocator model {:s} pruning ratio = {:.4f}",
+    spdlog::info("allocator model {:s} pruning ratio = {:.3f}",
                  candidate_model_settings_[model_i].model_setting_str,
                  candidate_model_settings_[model_i].pruning_prob);
 #endif
@@ -207,9 +289,11 @@ RESPONSE dstree::Allocator::trial_collect_mthread() {
 }
 
 RESPONSE dstree::Allocator::evaluate() {
+  //
   // test cpu_ms_per_series_
-  auto batch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().leaf_max_nseries_;
-  VALUE_TYPE * trial_batch = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), batch_nbytes));
+  auto batch_nbytes =
+      static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().leaf_max_nseries_;
+  VALUE_TYPE *trial_batch = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), batch_nbytes));
 
   auto distances = make_reserved<VALUE_TYPE>(config_.get().leaf_max_nseries_);
 
@@ -225,12 +309,13 @@ RESPONSE dstree::Allocator::evaluate() {
       std::ifstream db_fin;
       db_fin.open(config_.get().db_filepath_, std::ios::in | std::ios::binary);
 
-      ID_TYPE batch_bytes_offset = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * uni_i_d(rng);
+      ID_TYPE batch_bytes_offset = static_cast<ID_TYPE>(
+          sizeof(VALUE_TYPE)) * config_.get().series_length_ * uni_i_d(rng);
 
       db_fin.seekg(batch_bytes_offset);
       db_fin.read(reinterpret_cast<char *>(trial_batch), batch_nbytes);
 
-      for (ID_TYPE series_i = 0; series_i < config_.get().leaf_max_nseries_; ++ series_i) {
+      for (ID_TYPE series_i = 0; series_i < config_.get().leaf_max_nseries_; ++series_i) {
         VALUE_TYPE distance = upcite::cal_EDsquare(trial_batch,
                                                    trial_batch + series_i * config_.get().series_length_,
                                                    config_.get().series_length_);
@@ -244,7 +329,8 @@ RESPONSE dstree::Allocator::evaluate() {
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
 
-    cpu_ms_per_series_ = duration.count() / static_cast<double_t>(config_.get().allocator_cpu_trial_iterations_ * config_.get().leaf_max_nseries_);
+    cpu_ms_per_series_ = duration.count() / static_cast<double_t>(
+        config_.get().allocator_cpu_trial_iterations_ * config_.get().leaf_max_nseries_);
   } else {
     std::ifstream db_fin;
     db_fin.open(config_.get().db_filepath_, std::ios::in | std::ios::binary);
@@ -255,7 +341,7 @@ RESPONSE dstree::Allocator::evaluate() {
     for (ID_TYPE trial_i = 0; trial_i < config_.get().allocator_cpu_trial_iterations_; ++trial_i) {
       distances.clear();
 
-      for (ID_TYPE series_i = 0; series_i < config_.get().leaf_max_nseries_; ++ series_i) {
+      for (ID_TYPE series_i = 0; series_i < config_.get().leaf_max_nseries_; ++series_i) {
         VALUE_TYPE distance = upcite::cal_EDsquare(trial_batch,
                                                    trial_batch + series_i * config_.get().series_length_,
                                                    config_.get().series_length_);
@@ -268,22 +354,25 @@ RESPONSE dstree::Allocator::evaluate() {
 
     db_fin.close();
 
-    cpu_ms_per_series_ = duration.count() / static_cast<double_t>(config_.get().allocator_cpu_trial_iterations_ * config_.get().leaf_max_nseries_);
+    cpu_ms_per_series_ = duration.count() / static_cast<double_t>(
+        config_.get().allocator_cpu_trial_iterations_ * config_.get().leaf_max_nseries_);
   }
 
 #ifdef DEBUG
   spdlog::info("allocator trial cpu time = {:.6f}ms", cpu_ms_per_series_);
 #endif
 
+  //
   // test candidate_model_setting_.pruning_prob
   trial_collect_mthread();
 
+  //
   // calculate gain for [node_i, model_i]
   filter_ids_.reserve(filter_infos_.size());
   gains_matrix_.reserve(filter_infos_.size() * candidate_model_settings_.size());
   mem_matrix_.reserve(filter_infos_.size() * candidate_model_settings_.size());
 
-  for (ID_TYPE filter_i = 0; filter_i < filter_infos_.size(); ++filter_i){
+  for (ID_TYPE filter_i = 0; filter_i < filter_infos_.size(); ++filter_i) {
     auto &filter_info = filter_infos_[filter_i];
     filter_info.score = 0;
 
@@ -302,7 +391,8 @@ RESPONSE dstree::Allocator::evaluate() {
       }
 
       auto gain = static_cast<VALUE_TYPE>(static_cast<double_t>(filter_info.node_.get().get_size())
-          * static_cast<double_t>((1 - filter_info.external_pruning_probability_) * candidate_model_setting_.pruning_prob)
+          * static_cast<double_t>((1 - filter_info.external_pruning_probability_)
+              * candidate_model_setting_.pruning_prob)
           * (cpu_ms_per_series_ - amortized_gpu_sps));
 
       if (gain < 0) {

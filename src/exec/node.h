@@ -94,7 +94,7 @@ class Node {
     return filter_.get()->get_node_summarization_pruning_frequency();
   };
 
-  RESPONSE implant_filter(ID_TYPE id, std::reference_wrapper<torch::Tensor> shared_train_queries) {
+  RESPONSE add_filter(ID_TYPE id, std::reference_wrapper<torch::Tensor> shared_train_queries) {
     filter_ = std::make_unique<dstree::Filter>(config_, id, shared_train_queries);
     return SUCCESS;
   }

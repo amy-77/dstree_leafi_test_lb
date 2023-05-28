@@ -95,7 +95,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_trial_confidence_level_(0.95),
     filter_trial_iterations_(10000),
     filter_trial_nnode_(32),
-    filter_trial_filter_preselection_size_threshold_(100),
+    filter_trial_filter_preselection_size_threshold_(8),
     allocator_cpu_trial_iterations_(32) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
@@ -236,8 +236,8 @@ dstree::Config::Config(int argc, char *argv[]) :
        po::value<ID_TYPE>(&filter_trial_iterations_)->default_value(10000),
        "Filter no. queries for model speed test (default: 10000)")
       ("filter_trial_filter_preselection_size_threshold",
-       po::value<ID_TYPE>(&filter_trial_filter_preselection_size_threshold_)->default_value(100),
-       "Filter size threshold to run trials (default: 100)")
+       po::value<ID_TYPE>(&filter_trial_filter_preselection_size_threshold_)->default_value(8),
+       "Filter size threshold to run trials (default: 8)")
       ("filter_trial_nnode",
        po::value<ID_TYPE>(&filter_trial_nnode_)->default_value(32),
        "Filter size threshold to run trials (default: 32)")

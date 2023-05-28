@@ -79,12 +79,13 @@ dstree::Filter::Filter(dstree::Config &config,
     device_ = std::make_unique<torch::Device>(torch::kCPU);
   }
 
-  // delayed until allocated
+  // delayed until allocated (either in trial or activation)
   model_ = nullptr;
 
   if (!config.to_load_index_) {
     bsf_distances_.reserve(config.filter_train_nexample_);
     nn_distances_.reserve(config.filter_train_nexample_);
+    lb_distances_.reserve(config.filter_train_nexample_);
   }
 
   if (config.filter_is_conformal_) {
@@ -100,8 +101,6 @@ RESPONSE dstree::Filter::train(bool is_trial) {
     return FAILURE;
   }
 
-#ifdef DEBUG
-//#ifndef DEBUGGED
   if (train_size_ < config_.get().filter_train_nexample_) {
     spdlog::error("{:d} train examples collected; expected {:d}",
                   train_size_, config_.get().filter_train_nexample_);
@@ -110,8 +109,6 @@ RESPONSE dstree::Filter::train(bool is_trial) {
     spdlog::shutdown();
     exit(FAILURE);
   }
-//#endif
-#endif
 
   if (!is_active_ && !is_trial) {
     spdlog::error("filter {:d} neither is_active nor is_trial; exit", id_);
@@ -119,17 +116,18 @@ RESPONSE dstree::Filter::train(bool is_trial) {
     exit(FAILURE);
   }
 
-  // TODO instantiate the model according to the assigned model_setting_
-  model_ = std::make_unique<dstree::MLPFilter>(config_.get().series_length_,
-                                               config_.get().filter_dim_latent_,
-                                               config_.get().filter_train_dropout_p_,
-                                               config_.get().filter_leaky_relu_negative_slope_);
-  model_->to(*device_);
-
   ID_TYPE stream_id = -1;
   if (config_.get().filter_train_is_gpu_) {
     stream_id = at::cuda::getCurrentCUDAStream(config_.get().filter_device_id_).id(); // compiles with libtorch-gpu
   }
+
+  // TODO instantiate the model according to the assigned model_setting_
+  model_ = std::make_shared<dstree::MLPFilter>(config_.get().series_length_,
+                                               config_.get().filter_dim_latent_,
+                                               config_.get().filter_train_dropout_p_,
+                                               config_.get().filter_leaky_relu_negative_slope_);
+
+  model_->to(*device_);
 
   if (config_.get().filter_remove_square_ && !is_distances_preprocessed_) {
     for (ID_TYPE i = 0; i < train_size_; ++i) {
@@ -233,10 +231,9 @@ RESPONSE dstree::Filter::train(bool is_trial) {
     batch_train_losses.clear();
 #endif
 
-    VALUE_TYPE valid_loss = 0;
-
     { // evaluate
-//      torch::NoGradGuard no_grad;
+      VALUE_TYPE valid_loss = 0;
+
       c10::InferenceMode guard;
       model_->eval();
 
@@ -303,6 +300,15 @@ RESPONSE dstree::Filter::train(bool is_trial) {
           * config_.get().filter_trial_confidence_level_);
 
       conformal_predictor_->set_alpha(residuals[residual_i], true);
+
+#ifdef DEBUG
+//#ifndef DEBUGGED
+      spdlog::debug("trial filter {:d} stream {:d} model {:s} trial error (half-)interval = {:.3f} @ {:.3f}",
+                    id_, stream_id, model_setting_ref_.get().model_setting_str,
+                    get_abs_error_interval(),
+                    config_.get().filter_trial_confidence_level_);
+//#endif
+#endif
     } else {
       conformal_predictor_->fit(residuals);
     }
@@ -597,7 +603,7 @@ VALUE_TYPE dstree::Filter::get_node_summarization_pruning_frequency() const {
   return static_cast<VALUE_TYPE>(pruned_counter) / static_cast<VALUE_TYPE>(lb_distances_.size());
 }
 
-VALUE_TYPE upcite::dstree::Filter::get_valid_pruning_ratio() const {
+VALUE_TYPE upcite::dstree::Filter::get_val_pruning_ratio() const {
   ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
   ID_TYPE num_valid_examples = train_size_ - num_train_examples;
   ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
@@ -611,6 +617,17 @@ VALUE_TYPE upcite::dstree::Filter::get_valid_pruning_ratio() const {
     }
   }
 
+#ifdef DEBUG
+#ifndef DEBUGGED
+  spdlog::debug("filter {:d} model {:s} err = {:.3f}, {:d} / {:d} (+{:d}) = {:.3f}",
+                id_, model_setting_ref_.get().model_setting_str,
+                abs_error_interval,
+                pruned_counter,
+                num_conformal_examples,
+                num_train_examples,
+                static_cast<VALUE_TYPE>(pruned_counter) / num_conformal_examples);
+#endif
+#endif
+
   return static_cast<VALUE_TYPE>(pruned_counter) / num_conformal_examples;
 }
-

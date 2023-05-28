@@ -40,11 +40,15 @@ class Filter {
 
   bool is_active() const { return is_active_; }
   RESPONSE activate(MODEL_SETTING &model_setting) {
-    return set_model(model_setting);
+    model_setting_ref_ = model_setting;
+    is_active_ = true;
+
+    return SUCCESS;
   }
 
-  RESPONSE set_model(MODEL_SETTING &model_setting) {
+  RESPONSE trigger_trial(MODEL_SETTING &model_setting) {
     model_setting_ref_ = model_setting;
+    is_active_ = false;
 
     return SUCCESS;
   }
@@ -61,7 +65,7 @@ class Filter {
   VALUE_TYPE get_bsf_distance(ID_TYPE pos) const { return bsf_distances_[pos]; };
   VALUE_TYPE get_pred_distance(ID_TYPE pos) const { return pred_distances_[pos]; };
 
-  VALUE_TYPE get_valid_pruning_ratio() const;
+  VALUE_TYPE get_val_pruning_ratio() const;
 
   VALUE_TYPE get_abs_error_interval() const {
     return conformal_predictor_->get_alpha();

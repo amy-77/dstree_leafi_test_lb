@@ -56,7 +56,7 @@ struct MODEL_SETTING {
 
 #ifdef DEBUG
     //#ifndef DEBUGGED
-    spdlog::debug("model_setting: {:d} segments in {:s}",
+    spdlog::debug("model_setting {:d} segments in {:s}",
                   setting_segments.size(), setting_str);
     //#endif
 #endif

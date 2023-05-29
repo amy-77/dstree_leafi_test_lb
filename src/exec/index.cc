@@ -134,14 +134,12 @@ RESPONSE dstree::Index::filter_collect() {
     const VALUE_TYPE *series_ptr = filter_train_query_ptr_ + config_.get().series_length_ * query_id;
 
     ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
-    auto answer = std::make_shared<dstree::Answer>(config_.get().n_nearest_neighbor_, query_id);
+    auto answer = std::make_shared<dstree::Answers>(config_.get().n_nearest_neighbor_, query_id);
     std::reference_wrapper<dstree::Node> resident_node = std::ref(*root_);
 
     while (!resident_node.get().is_leaf()) {
       resident_node = resident_node.get().route(series_ptr);
     }
-
-    ID_TYPE resident_node_id = resident_node.get().get_id();
 
     VALUE_TYPE local_nn_distance = resident_node.get().search(series_ptr, m256_fetch_cache);
     resident_node.get().push_filter_example(answer->get_bsf(), local_nn_distance, 0);
@@ -153,7 +151,7 @@ RESPONSE dstree::Index::filter_collect() {
       spdlog::info("filter query {:d} update bsf {:.3f} after node {:d} series {:d}",
                    query_id, local_nn_distance, visited_node_counter, visited_series_counter);
 
-      answer->push_bsf(local_nn_distance);
+      answer->push_bsf(local_nn_distance, resident_node.get().get_id());
     }
 
     leaf_min_heap_.push(std::make_tuple(std::ref(*root_), 0));
@@ -170,7 +168,7 @@ RESPONSE dstree::Index::filter_collect() {
       leaf_min_heap_.pop();
 
       if (node_to_visit.get().is_leaf()) {
-        if (node_to_visit.get().get_id() != resident_node_id) {
+        if (node_to_visit.get().get_id() != resident_node.get().get_id()) {
           local_nn_distance = node_to_visit.get().search(series_ptr, m256_fetch_cache);
           node_to_visit.get().push_filter_example(answer->get_bsf(), local_nn_distance, node2visit_lbdistance);
 
@@ -181,7 +179,7 @@ RESPONSE dstree::Index::filter_collect() {
             spdlog::info("filter query {:d} update bsf {:.3f} after node {:d} series {:d}",
                          query_id, local_nn_distance, visited_node_counter, visited_series_counter);
 
-            answer->push_bsf(local_nn_distance);
+            answer->push_bsf(local_nn_distance, node_to_visit.get().get_id());
           }
         }
       } else {
@@ -211,7 +209,7 @@ RESPONSE dstree::Index::filter_collect() {
 struct SearchCache {
   SearchCache(ID_TYPE thread_id,
               VALUE_TYPE *m256_fetch_cache,
-              dstree::Answer *answer,
+              dstree::Answers *answer,
               pthread_mutex_t *answer_mutex,
               std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE,
                                                          std::vector<dstree::NODE_DISTNCE>,
@@ -239,7 +237,7 @@ struct SearchCache {
 
   VALUE_TYPE *m256_fetch_cache_;
 
-  dstree::Answer *answer_;
+  dstree::Answers *answer_;
   pthread_mutex_t *answer_mutex_;
 
   std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE, std::vector<dstree::NODE_DISTNCE>, dstree::Compare>>
@@ -315,7 +313,7 @@ void search_thread_F(const SearchCache &search_cache) {
 
     if (local_nn_distance < local_bsf) {
       pthread_mutex_lock(search_cache.answer_mutex_);
-      search_cache.answer_->push_bsf(local_nn_distance);
+      search_cache.answer_->push_bsf(local_nn_distance, node_to_visit.get().get_id());
       pthread_mutex_unlock(search_cache.answer_mutex_);
 
 #ifdef DEBUG
@@ -341,7 +339,7 @@ RESPONSE dstree::Index::filter_collect_mthread() {
   ID_TYPE visited_node_counter = 0;
   ID_TYPE visited_series_counter = 0;
 
-  auto answer = std::make_unique<dstree::Answer>(config_.get().n_nearest_neighbor_, -1);
+  auto answer = std::make_unique<dstree::Answers>(config_.get().n_nearest_neighbor_, -1);
 
   std::unique_ptr<pthread_mutex_t> answer_mutex = std::make_unique<pthread_mutex_t>();
   std::unique_ptr<pthread_mutex_t> leaf_pq_mutex = std::make_unique<pthread_mutex_t>();
@@ -394,7 +392,7 @@ RESPONSE dstree::Index::filter_collect_mthread() {
       spdlog::info("filter query {:d} update bsf {:.3f} after node {:d} series {:d}",
                    query_id, local_nn_distance, visited_node_counter, visited_series_counter);
 
-      answer->push_bsf(local_nn_distance);
+      answer->push_bsf(local_nn_distance, resident_node.get().get_id());
     }
 
     assert(node_stack.empty() && leaf_min_heap_.empty());
@@ -857,7 +855,7 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
     route_ptr = sketch_ptr;
   }
 
-  auto answer = std::make_shared<dstree::Answer>(config_.get().n_nearest_neighbor_, query_id);
+  auto answers = std::make_shared<dstree::Answers>(config_.get().n_nearest_neighbor_, query_id);
 
   if (config_.get().require_neurofilter_) {
     filter_query_tsr_ = torch::from_blob(series_ptr,
@@ -875,7 +873,7 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
   ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
   ID_TYPE nfpruned_node_counter = 0, nfpruned_series_counter = 0;
 
-  resident_node.get().search(series_ptr, *answer, visited_node_counter, visited_series_counter);
+  resident_node.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
 
   if (config_.get().is_exact_search_) {
     leaf_min_heap_.push(std::make_tuple(std::ref(*root_), root_->cal_lower_bound_EDsquare(route_ptr)));
@@ -905,7 +903,7 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
         if (visited_node_counter < config_.get().search_max_nnode_ &&
             visited_series_counter < config_.get().search_max_nseries_) {
           if (node_to_visit.get().get_id() != resident_node.get().get_id()) {
-            if (config_.get().examine_ground_truth_ || answer->is_bsf(node2visit_lbdistance)) {
+            if (config_.get().examine_ground_truth_ || answers->is_bsf(node2visit_lbdistance)) {
               if (node_to_visit.get().has_active_filter()) {
                 VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
 
@@ -919,14 +917,14 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
 #endif
 #endif
 
-                if (predicted_nn_distance > answer->get_bsf()) {
+                if (predicted_nn_distance > answers->get_bsf()) {
                   nfpruned_node_counter += 1;
                   nfpruned_series_counter += node_to_visit.get().get_size();
                 } else {
-                  node_to_visit.get().search(series_ptr, *answer, visited_node_counter, visited_series_counter);
+                  node_to_visit.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
                 }
               } else {
-                node_to_visit.get().search(series_ptr, *answer, visited_node_counter, visited_series_counter);
+                node_to_visit.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
               }
             }
           }
@@ -935,7 +933,7 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
         for (auto child_node : node_to_visit.get()) {
           VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(route_ptr);
 
-          if (config_.get().examine_ground_truth_ || answer->is_bsf(child_lower_bound_EDsquare)) {
+          if (config_.get().examine_ground_truth_ || answers->is_bsf(child_lower_bound_EDsquare)) {
             leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
           }
         }
@@ -952,9 +950,17 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
   }
 
   ID_TYPE nnn_to_return = config_.get().n_nearest_neighbor_;
-  while (!answer->empty()) {
-    spdlog::info("query {:d} nn {:d} = {:.3f}",
-                 query_id, nnn_to_return, answer->pop_bsf());
+
+  while (!answers->empty()) {
+    auto answer = answers->pop_answer();
+
+    if (answer.node_id_ > 0) {
+      spdlog::info("query {:d} nn {:d} = {:.3f}, node {:d}",
+                   query_id, nnn_to_return, answer.nn_dist_, answer.node_id_);
+    } else {
+      spdlog::info("query {:d} nn {:d} = {:.3f}",
+                   query_id, nnn_to_return, answer.nn_dist_);
+    }
 
     nnn_to_return -= 1;
   }

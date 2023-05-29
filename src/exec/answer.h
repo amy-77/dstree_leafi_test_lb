@@ -14,12 +14,27 @@
 namespace constant = upcite::constant;
 
 namespace upcite {
+
+struct Answer {
+ public:
+  explicit Answer(VALUE_TYPE nn_dist, ID_TYPE node_id = -1) : nn_dist_(nn_dist), node_id_(node_id) {};
+  ~Answer() = default;
+
+  VALUE_TYPE nn_dist_;
+  ID_TYPE node_id_;
+};
+
+struct compAnswerLess {
+ public:
+  bool operator()(Answer &answer_1, Answer &answer_2) const { return answer_1.nn_dist_ < answer_2.nn_dist_; }
+};
+
 namespace dstree {
 
-class Answer {
+class Answers {
  public:
-  Answer(ID_TYPE capacity, ID_TYPE query_id);
-  ~Answer() = default;
+  Answers(ID_TYPE capacity, ID_TYPE query_id);
+  ~Answers() = default;
 
   bool is_bsf(VALUE_TYPE distance) const {
     if (bsf_distances_.size() < capacity_) {
@@ -30,8 +45,8 @@ class Answer {
     }
   }
 
-  RESPONSE push_bsf(VALUE_TYPE distance);
-  RESPONSE check_push_bsf(VALUE_TYPE distance);
+  RESPONSE push_bsf(VALUE_TYPE distance, ID_TYPE node_id = -1);
+  RESPONSE check_push_bsf(VALUE_TYPE distance, ID_TYPE node_id = -1);
 
   VALUE_TYPE get_bsf() const {
 //    return bsf_distances_.top();
@@ -39,6 +54,7 @@ class Answer {
   };
 
   VALUE_TYPE pop_bsf();
+  Answer pop_answer();
 
   RESPONSE reset(ID_TYPE query_id) {
     query_id_ = query_id;
@@ -56,14 +72,11 @@ class Answer {
 
   ID_TYPE query_id_;
 
-//  std::priority_queue<VALUE_TYPE, std::vector<VALUE_TYPE>, std::less<>> bsf_distances_;
-
  private:
   ID_TYPE capacity_;
   VALUE_TYPE bsf_distance_;
 
-  // TODO with-id bsf heap
-  std::priority_queue<VALUE_TYPE, std::vector<VALUE_TYPE>, std::less<>> bsf_distances_;
+  std::priority_queue<Answer, std::vector<Answer>, compAnswerLess> bsf_distances_;
 };
 
 }

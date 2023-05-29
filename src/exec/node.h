@@ -48,7 +48,7 @@ class Node {
                  ID_TYPE first_child_id);
 
   RESPONSE search(const VALUE_TYPE *query_series_ptr,
-                  Answer &answer,
+                  Answers &answer,
                   ID_TYPE &visited_node_counter,
                   ID_TYPE &visited_series_counter) const;
 

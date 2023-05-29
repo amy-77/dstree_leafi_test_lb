@@ -600,7 +600,7 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
 }
 
 RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
-                              dstree::Answer &answer,
+                              dstree::Answers &answer,
                               ID_TYPE &visited_node_counter,
                               ID_TYPE &visited_series_counter) const {
   const VALUE_TYPE *db_series_ptr = buffer_.get().get_next_series_ptr();
@@ -621,10 +621,11 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 #endif
 
     if (answer.is_bsf(distance)) {
-      answer.push_bsf(distance);
+      answer.push_bsf(distance, id_);
 
-      spdlog::info("query {:d} update bsf {:.3f} at node {:d} series {:d}",
-                   answer.query_id_, distance, visited_node_counter, visited_series_counter);
+      spdlog::info("query {:d} update bsf {:.3f} (from node {:d}) visiting node {:d} series {:d}",
+                   answer.query_id_, distance, id_,
+                   visited_node_counter, visited_series_counter);
     }
 
     visited_series_counter += 1;

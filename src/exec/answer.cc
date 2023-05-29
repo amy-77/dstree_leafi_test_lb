@@ -10,37 +10,45 @@
 namespace dstree = upcite::dstree;
 namespace constant = upcite::constant;
 
-dstree::Answer::Answer(ID_TYPE capacity, ID_TYPE query_id) :
+dstree::Answers::Answers(ID_TYPE capacity, ID_TYPE query_id) :
     capacity_(capacity),
     query_id_(query_id),
     bsf_distance_(constant::MAX_VALUE) {
-  bsf_distances_ = std::priority_queue<VALUE_TYPE, std::vector<VALUE_TYPE>, std::less<>>(
-      std::less<>(), make_reserved<VALUE_TYPE>(capacity + 1));
+//  std::priority_queue<Answer, std::vector<Answer>, compAnswerLess> bsf_distances_;
+  bsf_distances_ = std::priority_queue<Answer, std::vector<Answer>, compAnswerLess>(
+      compAnswerLess(), make_reserved<Answer>(capacity + 1));
 }
 
-RESPONSE dstree::Answer::push_bsf(VALUE_TYPE distance) {
-  bsf_distances_.push(distance);
+RESPONSE dstree::Answers::push_bsf(VALUE_TYPE distance, ID_TYPE node_id) {
+  bsf_distances_.emplace(distance, node_id);
 
   if (bsf_distances_.size() > capacity_) {
     bsf_distances_.pop();
   }
 
-  bsf_distance_ = bsf_distances_.top();
+  bsf_distance_ = bsf_distances_.top().nn_dist_;
 
   return SUCCESS;
 }
 
-RESPONSE dstree::Answer::check_push_bsf(VALUE_TYPE distance) {
+RESPONSE dstree::Answers::check_push_bsf(VALUE_TYPE distance, ID_TYPE node_id) {
   if (is_bsf(distance)) {
-    push_bsf(distance);
+    push_bsf(distance, node_id);
   }
 
   return SUCCESS;
 }
 
-VALUE_TYPE dstree::Answer::pop_bsf() {
-  VALUE_TYPE bsf = bsf_distances_.top();
+VALUE_TYPE dstree::Answers::pop_bsf() {
+  VALUE_TYPE bsf = bsf_distances_.top().nn_dist_;
   bsf_distances_.pop();
 
   return bsf;
+}
+
+upcite::Answer dstree::Answers::pop_answer() {
+  auto answer = bsf_distances_.top();
+  bsf_distances_.pop();
+
+  return answer;
 }

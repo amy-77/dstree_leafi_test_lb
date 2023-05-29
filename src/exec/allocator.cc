@@ -475,20 +475,26 @@ RESPONSE dstree::Allocator::assign() {
 }
 
 RESPONSE dstree::Allocator::set_confidence_from_recall() {
+#ifdef DEBUG
+#ifndef DEBUGGED
+  spdlog::debug("allocator filter_infos_.size() = {:d}",
+                filter_infos_.size());
+#endif
+#endif
+
   if (!is_recall_calculated_) {
-    auto num_train_examples =
-        static_cast<ID_TYPE>(config_.get().filter_train_nexample_ * config_.get().filter_train_val_split_);
+    auto num_train_examples = static_cast<ID_TYPE>(
+        config_.get().filter_train_nexample_ * config_.get().filter_train_val_split_);
     ID_TYPE num_valid_examples = config_.get().filter_train_nexample_ - num_train_examples;
     ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
 
     auto nn_distances = upcite::make_reserved<VALUE_TYPE>(num_conformal_examples);
     auto nn_filter_ids = upcite::make_reserved<ID_TYPE>(num_conformal_examples);
 
-    for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
-      nn_distances[i] = constant::MAX_VALUE;
-    }
-
     for (ID_TYPE query_i = 0; query_i < num_conformal_examples; ++query_i) {
+      nn_distances.push_back(constant::MAX_VALUE);
+      nn_filter_ids.push_back(-1);
+
       for (ID_TYPE filter_i = 0; filter_i < filter_infos_.size(); ++filter_i) {
 //    if (filter_infos_[i].node_.get().has_active_filter()) { // nn should be searched from all nodes
         VALUE_TYPE local_nn = filter_infos_[filter_i].node_.get().get_filter_nn_distance(num_train_examples + query_i);
@@ -500,7 +506,17 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
       }
     }
 
+#ifdef DEBUG
+//#ifndef DEBUGGED
+    spdlog::debug("allocator nn_distances = {:s}",
+                  upcite::array2str(nn_distances.data(), num_conformal_examples));
+    spdlog::debug("allocator nn_filter_ids = {:s}",
+                  upcite::array2str(nn_filter_ids.data(), num_conformal_examples));
+//#endif
+#endif
+
     // two sentry points: recall at small error (recall_at_0_error, 0_error), recall at large error (0.999999, 42)
+    // corresponding errors were already added
     validation_recalls_.reserve(num_conformal_examples + 2);
 
     // recall at validation error intervals

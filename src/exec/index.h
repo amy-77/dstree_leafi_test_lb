@@ -57,7 +57,7 @@ class Index {
   RESPONSE filter_collect_mthread();
 
   // assign model settings to filters and initialize their model variable
-  RESPONSE filter_allocate();
+  RESPONSE filter_allocate(bool to_assign = true);
 
   RESPONSE filter_train();
   RESPONSE filter_train_mthread();

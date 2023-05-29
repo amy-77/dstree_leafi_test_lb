@@ -96,6 +96,52 @@ dstree::Filter::Filter(dstree::Config &config,
   }
 }
 
+RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial) {
+  ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
+  ID_TYPE num_valid_examples = train_size_ - num_train_examples;
+  ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+
+  auto residuals = upcite::make_reserved<ERROR_TYPE>(num_conformal_examples + 2);
+
+  // residuals with two sentries, i.e., 0 and max_pred_distance
+  residuals.push_back(0);
+  residuals.push_back(*std::max_element(std::begin(pred_distances_) + num_train_examples,
+                                        std::begin(pred_distances_) + num_train_examples + num_conformal_examples));
+
+  for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
+    // TODO torch::Tensor to ptr is not stable
+    if (pred_distances_[num_train_examples + i] > constant::MIN_VALUE &&
+        pred_distances_[num_train_examples + i] < constant::MAX_VALUE &&
+        !upcite::equals_zero(pred_distances_[num_train_examples + i])) {
+      // TODO not necessary for global symmetrical confidence intervals
+      residuals.emplace_back(pred_distances_[num_train_examples + i] - nn_distances_[num_train_examples + i]);
+    }
+  }
+
+  if (is_trial) {
+    for (auto &residual : residuals) { residual = residual < 0 ? -residual : residual; }
+    std::sort(residuals.begin(), residuals.end());
+
+    auto residual_i = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(residuals.size())
+        * config_.get().filter_trial_confidence_level_);
+
+    conformal_predictor_->set_alpha(residuals[residual_i], true);
+
+#ifdef DEBUG
+//#ifndef DEBUGGED
+    spdlog::debug("trial filter {:d} model {:s} trial error (half-)interval = {:.3f} @ {:.2f}",
+                  id_, model_setting_ref_.get().model_setting_str,
+                  get_abs_error_interval(),
+                  config_.get().filter_trial_confidence_level_);
+//#endif
+#endif
+  } else {
+    conformal_predictor_->fit(residuals);
+  }
+
+  return SUCCESS;
+}
+
 RESPONSE dstree::Filter::train(bool is_trial) {
   if (is_trained_ || config_.get().to_load_filters_) {
     return FAILURE;
@@ -274,44 +320,7 @@ RESPONSE dstree::Filter::train(bool is_trial) {
 #endif
 
   if (config_.get().filter_is_conformal_) {
-    ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
-    auto residuals = upcite::make_reserved<ERROR_TYPE>(num_conformal_examples + 2);
-
-    // residuals with two sentries, i.e., 0 and max_pred_distance
-    residuals.push_back(0);
-    residuals.push_back(*std::max_element(std::begin(pred_distances_) + num_train_examples,
-                                          std::begin(pred_distances_) + num_train_examples + num_conformal_examples));
-
-    for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
-      // TODO torch::Tensor to ptr is not stable
-      if (predictions_array[num_train_examples + i] > constant::MIN_VALUE &&
-          predictions_array[num_train_examples + i] < constant::MAX_VALUE &&
-          !upcite::equals_zero(predictions_array[num_train_examples + i])) {
-        // TODO not necessary for global symmetrical confidence intervals
-        residuals.emplace_back(predictions_array[num_train_examples + i] - nn_distances_[num_train_examples + i]);
-      }
-    }
-
-    if (is_trial) {
-      for (auto &residual : residuals) { residual = residual < 0 ? -residual : residual; }
-      std::sort(residuals.begin(), residuals.end());
-
-      ID_TYPE residual_i = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(residuals.size())
-          * config_.get().filter_trial_confidence_level_);
-
-      conformal_predictor_->set_alpha(residuals[residual_i], true);
-
-#ifdef DEBUG
-//#ifndef DEBUGGED
-      spdlog::debug("trial filter {:d} stream {:d} model {:s} trial error (half-)interval = {:.3f} @ {:.3f}",
-                    id_, stream_id, model_setting_ref_.get().model_setting_str,
-                    get_abs_error_interval(),
-                    config_.get().filter_trial_confidence_level_);
-//#endif
-#endif
-    } else {
-      conformal_predictor_->fit(residuals);
-    }
+    fit_conformal_predictor(is_trial);
   }
 
   if (torch::cuda::is_available() && model_setting_ref_.get().gpu_mem_mb <= constant::EPSILON) {
@@ -581,8 +590,12 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   size_indicator = ifs_id_buf[0];
   if (size_indicator > 0) {
-    // TODO load only if (config_.get().to_load_filters_); the current implementation works though
     conformal_predictor_->load(node_ifs, ifs_buf);
+
+    if (config_.get().filter_is_conformal_) {
+      // TODO check compatibility between the loaded setting and the new setting
+      fit_conformal_predictor();
+    }
   }
 
   return SUCCESS;

@@ -201,6 +201,12 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Whether to load the trained filters")
       ("index_load_folderpath", po::value<std::string>(&index_load_folderpath_),
        "Index load root folderpath")
+      ("index_load_node_info_folderpath", po::value<std::string>(&load_node_info_folderpath_),
+       "Index load node info folderpath")
+      ("index_load_filters_folderpath", po::value<std::string>(&load_filters_folderpath_),
+       "Index load filter folderpath")
+      ("index_load_data_folderpath", po::value<std::string>(&load_data_folderpath_),
+       "Index load raw data folderpath")
       ("filter_is_conformal", po::bool_switch(&filter_is_conformal_)->default_value(false),
        "Whether to use conformal filters")
       ("filter_conformal_core_type", po::value<std::string>(&filter_conformal_core_type_)->default_value("discrete"),

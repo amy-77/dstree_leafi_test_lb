@@ -87,6 +87,8 @@ class Filter {
   };
 
  private:
+  RESPONSE fit_conformal_predictor(bool is_trial = false);
+
   std::reference_wrapper<dstree::Config> config_;
 
   ID_TYPE id_;

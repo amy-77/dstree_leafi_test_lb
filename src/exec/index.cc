@@ -445,7 +445,7 @@ RESPONSE dstree::Index::filter_collect_mthread() {
   return SUCCESS;
 }
 
-RESPONSE dstree::Index::filter_allocate() {
+RESPONSE dstree::Index::filter_allocate(bool to_assign) {
   std::stack<std::reference_wrapper<dstree::Node>> node_cache;
   node_cache.push(std::ref(*root_));
 
@@ -465,7 +465,11 @@ RESPONSE dstree::Index::filter_allocate() {
     }
   }
 
-  return allocator_->assign();
+  if (to_assign) {
+    return allocator_->assign();
+  } else {
+    return SUCCESS;
+  }
 }
 
 RESPONSE dstree::Index::filter_train() {
@@ -741,8 +745,23 @@ RESPONSE dstree::Index::load() {
   leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare>(
       Compare(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));
 
-  if (config_.get().require_neurofilter_ && !config_.get().to_load_filters_) {
-    train();
+  if (config_.get().require_neurofilter_) {
+    if (!config_.get().to_load_filters_) {
+      train();
+    } else {
+      //
+      // initialize allocator for setting conformal intervals
+      filter_allocate(false);
+
+      // support difference devices for training and inference
+      if (config_.get().filter_infer_is_gpu_) {
+        // TODO support multiple devices
+        device_ = std::make_unique<torch::Device>(torch::kCUDA,
+                                                  static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
+      } else {
+        device_ = std::make_unique<torch::Device>(torch::kCPU);
+      }
+    }
   }
 
   return SUCCESS;

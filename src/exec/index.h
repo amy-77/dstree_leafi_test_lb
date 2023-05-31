@@ -18,18 +18,23 @@
 #include "node.h"
 #include "filter.h"
 #include "allocator.h"
+#include "navigator.h"
 
 namespace upcite {
 namespace dstree {
 
 using NODE_DISTNCE = std::tuple<std::reference_wrapper<dstree::Node>, VALUE_TYPE>;
 
-class Compare {
+class CompareDecrNodeDist {
  public:
   bool operator()(const NODE_DISTNCE &a, const NODE_DISTNCE &b) {
     return std::get<1>(a) > std::get<1>(b);
   }
 };
+
+static bool compDecrProb(std::tuple<ID_TYPE, VALUE_TYPE> &a, std::tuple<ID_TYPE, VALUE_TYPE> &b) {
+  return std::get<1>(a) > std::get<1>(b);
+}
 
 class Index {
  public:
@@ -43,6 +48,7 @@ class Index {
 
   RESPONSE search();
   RESPONSE search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr = nullptr);
+  RESPONSE search_navigated(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr = nullptr);
 
  private:
   RESPONSE insert(ID_TYPE batch_series_id);
@@ -68,7 +74,7 @@ class Index {
 
   std::unique_ptr<Node> root_;
   ID_TYPE nnode_, nleaf_;
-  std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare> leaf_min_heap_;
+  std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, CompareDecrNodeDist> leaf_min_heap_;
 
   std::unique_ptr<Allocator> allocator_;
 
@@ -77,6 +83,10 @@ class Index {
   torch::Tensor filter_query_tsr_;
   std::unique_ptr<torch::Device> device_;
   std::stack<std::reference_wrapper<Filter>> filter_cache_;
+
+  std::vector<Answers> train_answers_;
+  std::unique_ptr<Navigator> navigator_;
+  std::vector<std::reference_wrapper<Node>> leaf_nodes_;
 };
 
 }

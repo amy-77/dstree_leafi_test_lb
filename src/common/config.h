@@ -124,6 +124,13 @@ class Config {
   ID_TYPE filter_trial_filter_preselection_size_threshold_;
 
   ID_TYPE allocator_cpu_trial_iterations_;
+
+  bool navigator_is_learned_;
+  ID_TYPE navigator_train_k_nearest_neighbor_;
+  bool navigator_is_combined_;
+  VALUE_TYPE navigator_combined_lambda_;
+  bool navigator_is_gpu_;
+  VALUE_TYPE navigator_train_val_split_;
 };
 
 }

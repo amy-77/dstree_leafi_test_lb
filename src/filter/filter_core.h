@@ -11,7 +11,7 @@
 #include <string>
 
 #include <torch/torch.h>
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
 
 #include "global.h"
 #include "vec.h"
@@ -111,14 +111,14 @@ extern std::reference_wrapper<MODEL_SETTING> MODEL_SETTING_PLACEHOLDER_REF;
 
 namespace dstree {
 
-class FilterModel : public torch::nn::Module {
+class FilterCore : public torch::nn::Module {
  public:
-  ~FilterModel() override {};
+  ~FilterCore() override {};
 
   virtual torch::Tensor forward(torch::Tensor &x) = 0;
 };
 
-class MLPFilter : public FilterModel {
+class MLPFilter : public FilterCore {
  public:
   MLPFilter(ID_TYPE dim_input, ID_TYPE dim_latent, VALUE_TYPE dropout_p, VALUE_TYPE negative_slope) :
       dropout_p_(dropout_p),

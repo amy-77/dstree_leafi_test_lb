@@ -56,6 +56,10 @@ class Node {
                     VALUE_TYPE *m256_fetch_cache,
                     VALUE_TYPE bsf_distance = -1) const;
 
+  VALUE_TYPE search_mt(const VALUE_TYPE *query_series_ptr,
+                       Answers &answer,
+                       pthread_mutex_t *answer_mutex_) const;
+
   VALUE_TYPE cal_lower_bound_EDsquare(const VALUE_TYPE *series_ptr) const {
     return eapca_envelope_->cal_lower_bound_EDsquare(series_ptr);
   }

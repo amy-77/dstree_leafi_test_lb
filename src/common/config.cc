@@ -96,7 +96,13 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_trial_iterations_(10000),
     filter_trial_nnode_(32),
     filter_trial_filter_preselection_size_threshold_(8),
-    allocator_cpu_trial_iterations_(32) {
+    allocator_cpu_trial_iterations_(32),
+    navigator_is_learned_(false),
+    navigator_train_k_nearest_neighbor_(5),
+    navigator_is_combined_(false),
+    navigator_combined_lambda_(0.2),
+    navigator_is_gpu_(false),
+    navigator_train_val_split_(0.9) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -249,7 +255,25 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Filter size threshold to run trials (default: 32)")
       ("allocator_cpu_trial_iterations",
        po::value<ID_TYPE>(&allocator_cpu_trial_iterations_)->default_value(32),
-       "Allocator no. full nodes for cpu time estimation (default: 32)");
+       "Allocator no. full nodes for cpu time estimation (default: 32)")
+      ("navigator_is_learned",
+       po::bool_switch(&navigator_is_learned_)->default_value(false),
+       "Whether the leaf node visiting order is learned")
+      ("navigator_train_k_nearest_neighbor",
+       po::value<ID_TYPE>(&navigator_train_k_nearest_neighbor_)->default_value(5),
+       "The no. nearest neighbors used to learn node visiting order (default: 5)")
+      ("navigator_is_combined",
+       po::bool_switch(&navigator_is_combined_)->default_value(false),
+       "Whether to use the combine strategy for the learned navigator (default: false)")
+      ("navigator_combined_lambda",
+       po::value<VALUE_TYPE>(&navigator_combined_lambda_)->default_value(0.2),
+       "The lambda used to combine the learned navigator with conventional orders (default: 0.2)")
+      ("navigator_is_gpu",
+       po::bool_switch(&navigator_is_gpu_)->default_value(false),
+       "Whether to train nagivator on GPU (other on CPU; default: CPU)")
+      ("navigator_train_val_split",
+       po::value<VALUE_TYPE>(&navigator_train_val_split_)->default_value(0.9),
+       "Navigator train train/val split ratio");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -455,6 +479,18 @@ dstree::Config::Config(int argc, char *argv[]) :
       }
     }
   }
+
+  if (require_neurofilter_ && navigator_is_learned_) {
+    // TODO support
+    std::cout << "Learned filters and learned navigators are not supported at the same time yet" << std::endl;
+    exit(-1);
+  }
+
+  if (navigator_is_learned_) {
+    if (filter_train_batchsize_ < 0) {
+      filter_train_batchsize_ = filter_train_nexample_;
+    }
+  }
 }
 
 void dstree::Config::log() {
@@ -555,4 +591,11 @@ void dstree::Config::log() {
   spdlog::info("filter_conformal_smoothen_core = {:s}", filter_conformal_smoothen_core_);
 
   spdlog::info("filter_trial_confidence_level = {:.6f}", filter_trial_confidence_level_);
+
+  spdlog::info("navigator_is_learned = {:b}", navigator_is_learned_);
+  spdlog::info("navigator_train_k_nearest_neighbor = {:d}", navigator_train_k_nearest_neighbor_);
+  spdlog::info("navigator_is_combined = {:b}", navigator_is_combined_);
+  spdlog::info("navigator_combined_lambda = {:.6f}", navigator_combined_lambda_);
+  spdlog::info("navigator_is_gpu = {:b}", navigator_is_gpu_);
+  spdlog::info("navigator_train_val_split = {:.3f}", navigator_train_val_split_);
 }

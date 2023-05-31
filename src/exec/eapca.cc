@@ -7,7 +7,6 @@
 
 #include <tuple>
 #include <cmath>
-#include <iostream>
 
 #include <spdlog/spdlog.h>
 

@@ -623,7 +623,7 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
     if (answer.is_bsf(distance)) {
       answer.push_bsf(distance, id_);
 
-      spdlog::info("query {:d} update bsf {:.3f} (from node {:d}) visiting node {:d} series {:d}",
+      spdlog::info("query {:d} update bsf {:.3f} at node {:d} visiting node {:d} series {:d}",
                    answer.query_id_, distance, id_,
                    visited_node_counter, visited_series_counter);
     }
@@ -659,6 +659,44 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 
     if (distance < local_bsf) {
       local_bsf = distance;
+    }
+
+    db_series_ptr = buffer_.get().get_next_series_ptr();
+  }
+
+  buffer_.get().reset();
+
+  return local_bsf;
+}
+
+VALUE_TYPE dstree::Node::search_mt(const VALUE_TYPE *query_series_ptr,
+                                   Answers &answer,
+                                   pthread_mutex_t *answer_mutex) const {
+  const VALUE_TYPE *db_series_ptr = buffer_.get().get_next_series_ptr();
+  VALUE_TYPE local_bsf = constant::MAX_VALUE;
+
+  pthread_mutex_lock(answer_mutex);
+  VALUE_TYPE global_bsf = answer.get_bsf();
+  pthread_mutex_unlock(answer_mutex);
+
+  while (db_series_ptr != nullptr) {
+    VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_.get().series_length_);
+
+    if (distance < local_bsf) {
+      local_bsf = distance;
+
+      if (local_bsf < global_bsf) {
+        pthread_mutex_lock(answer_mutex);
+        answer.check_push_bsf(local_bsf, id_);
+
+        global_bsf = answer.get_bsf();
+        pthread_mutex_unlock(answer_mutex);
+
+#ifdef DEBUG
+        spdlog::info("query {:d} update bsf {:.3f} at node {:d}",
+                     answer.query_id_, local_bsf, id_);
+#endif
+      }
     }
 
     db_series_ptr = buffer_.get().get_next_series_ptr();
@@ -828,7 +866,7 @@ RESPONSE dstree::Node::load(void *ifs_buf,
   node_ifs.close();
 
   if (!children_.empty()) {
-    for (const auto & child : children_) {
+    for (const auto &child : children_) {
       status = child->load(ifs_buf, buffer_manager, nnode, nleaf);
 
       if (status == FAILURE) {

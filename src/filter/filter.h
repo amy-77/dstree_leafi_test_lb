@@ -15,7 +15,7 @@
 #include "global.h"
 #include "config.h"
 #include "conformal.h"
-#include "model.h"
+#include "filter_core.h"
 
 namespace upcite {
 namespace dstree {
@@ -98,7 +98,7 @@ class Filter {
   // for filter loading only
   MODEL_SETTING model_setting_;
   // torch::save only takes shared_ptr
-  std::shared_ptr<FilterModel> model_;
+  std::shared_ptr<FilterCore> model_;
   std::unique_ptr<ConformalRegressor> conformal_predictor_;
 
   // TODO ref?

@@ -19,44 +19,12 @@
 #include "vec.h"
 #include "comp.h"
 #include "interval.h"
+#include "dataset.h"
 #include "scheduler.h"
 
 namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
-
-class TORCH_API SeriesDataset
-    : public torch::data::datasets::Dataset<SeriesDataset> {
- public:
-  SeriesDataset(torch::Tensor &series,
-                std::vector<VALUE_TYPE> &targets,
-                int num_instances,
-                torch::Device device) :
-      series_(std::move(series.clone())),
-      targets_(torch::from_blob(targets.data(),
-                                num_instances,
-                                torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(device)) {
-  }
-
-  SeriesDataset(torch::Tensor &series,
-                torch::Tensor &targets,
-                int num_instances,
-                torch::Device device) :
-      series_(std::move(series.clone())),
-      targets_(std::move(targets.clone())) {
-  }
-
-  torch::data::Example<> get(size_t index) override {
-    return {series_[index], targets_[index]};
-  }
-
-  torch::optional<size_t> size() const override {
-    return targets_.size(0);
-  }
-
- private:
-  torch::Tensor series_, targets_;
-};
 
 dstree::Filter::Filter(dstree::Config &config,
                        ID_TYPE id,
@@ -215,7 +183,7 @@ RESPONSE dstree::Filter::train(bool is_trial) {
   ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
 
   auto train_data = shared_train_queries_.get().index({torch::indexing::Slice(0, num_train_examples)}).clone();
-  auto train_dataset = SeriesDataset(train_data, nn_distances_, num_train_examples, *device_);
+  auto train_dataset = upcite::SeriesDataset(train_data, nn_distances_, num_train_examples, *device_);
   auto train_data_loader = torch::data::make_data_loader<torch::data::samplers::RandomSampler>(
       train_dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
 
@@ -225,7 +193,7 @@ RESPONSE dstree::Filter::train(bool is_trial) {
   auto valid_target = torch::from_blob(nn_distances_.data() + num_train_examples,
                                        num_valid_examples,
                                        torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
-  auto valid_dataset = SeriesDataset(valid_data, valid_target, num_valid_examples, *device_);
+  auto valid_dataset = upcite::SeriesDataset(valid_data, valid_target);
   auto valid_data_loader = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
       valid_dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
 
@@ -381,7 +349,7 @@ RESPONSE dstree::Filter::train(bool is_trial) {
 
 VALUE_TYPE dstree::Filter::infer(torch::Tensor &query_series) const {
   if (is_trained_) {
-    torch::NoGradGuard no_grad;
+    c10::InferenceMode guard;
 
     VALUE_TYPE pred = model_->forward(query_series).item<VALUE_TYPE>();
     if (conformal_predictor_ != nullptr) {

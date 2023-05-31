@@ -12,7 +12,7 @@
 
 #include "global.h"
 #include "config.h"
-#include "model.h"
+#include "filter_core.h"
 #include "node.h"
 
 namespace upcite {

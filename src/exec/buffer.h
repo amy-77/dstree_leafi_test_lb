@@ -15,7 +15,6 @@
 
 #include "global.h"
 #include "config.h"
-//#include "logger.h"
 #include "eapca.h"
 
 namespace upcite {

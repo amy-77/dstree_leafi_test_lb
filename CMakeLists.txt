@@ -34,7 +34,9 @@ include_directories(
         ${TORCH_INCLUDE_DIRS}
         src/common
         src/util
+        src/model
         src/filter
+        src/navigator
         src/exec
 )
 
@@ -43,7 +45,9 @@ add_subdirectory(lib/spdlog-1.11.0)
 
 add_subdirectory(src/common)
 add_subdirectory(src/util)
+add_subdirectory(src/model)
 add_subdirectory(src/filter)
+add_subdirectory(src/navigator)
 add_subdirectory(src/exec)
 
 add_compile_options(-O0)
@@ -53,7 +57,7 @@ add_compile_options(-O0)
 target_compile_features(${TARGET} PRIVATE cxx_std_14)
 
 target_link_libraries(${TARGET}
-        PRIVATE exec filter util common spdlog::spdlog #fmt::fmt
+        PRIVATE exec navigator filter util common spdlog::spdlog #fmt::fmt
         )
 
 install(TARGETS ${TARGET} DESTINATION ${PROJECT_SOURCE_DIR}/bin)

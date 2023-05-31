@@ -3,7 +3,7 @@
 // Copyright (c) 2023 Université Paris Cité. All rights reserved.
 //
 
-#include "model.h"
+#include "filter_core.h"
 
 upcite::MODEL_SETTING upcite::MODEL_SETTING_PLACEHOLDER = upcite::MODEL_SETTING();
 std::reference_wrapper<upcite::MODEL_SETTING>

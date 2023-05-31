@@ -15,12 +15,12 @@
 #include <c10/cuda/CUDAStream.h>
 
 #include "str.h"
-#include "scheduler.h"
+#include "../src/model/scheduler.h"
 #include "distance.h"
 #include "global.h"
 #include "config.h"
 #include "logger.h"
-#include "model.h"
+#include "filter_core.h"
 
 namespace dstree = upcite::dstree;
 

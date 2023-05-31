@@ -34,7 +34,30 @@ namespace dstree {
 class Answers {
  public:
   Answers(ID_TYPE capacity, ID_TYPE query_id);
+  Answers(ID_TYPE capacity,
+          ID_TYPE query_id,
+          VALUE_TYPE bsf_distance,
+          std::priority_queue<Answer, std::vector<Answer>, compAnswerLess> &bsf_distances) :
+      capacity_(capacity),
+      query_id_(query_id),
+      bsf_distance_(bsf_distance),
+      bsf_distances_(std::priority_queue<Answer, std::vector<Answer>, compAnswerLess>(bsf_distances)) {};
   ~Answers() = default;
+
+  Answers(const Answers &answers) {
+    capacity_ = answers.capacity_;
+    query_id_ = answers.query_id_;
+    bsf_distance_ = answers.bsf_distance_;
+    bsf_distances_ = std::priority_queue<Answer, std::vector<Answer>, compAnswerLess>(answers.bsf_distances_);
+  }
+
+  Answers &operator=(const Answers &answers) {
+    capacity_ = answers.capacity_;
+    query_id_ = answers.query_id_;
+    bsf_distance_ = answers.bsf_distance_;
+    bsf_distances_ = std::priority_queue<Answer, std::vector<Answer>, compAnswerLess>(answers.bsf_distances_);
+    return *this;
+  };
 
   bool is_bsf(VALUE_TYPE distance) const {
     if (bsf_distances_.size() < capacity_) {

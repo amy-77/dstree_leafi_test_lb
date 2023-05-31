@@ -5,6 +5,7 @@
 
 #include "index.h"
 
+#include <tuple>
 #include <memory>
 #include <random>
 #include <algorithm>
@@ -29,7 +30,8 @@ dstree::Index::Index(Config &config) :
     nnode_(0),
     nleaf_(0),
     filter_train_query_ptr_(nullptr),
-    allocator_(nullptr) {
+    allocator_(nullptr),
+    navigator_(nullptr) {
   buffer_manager_ = std::make_unique<dstree::BufferManager>(config_);
 
   root_ = std::make_unique<dstree::Node>(config_, *buffer_manager_, 0, nnode_);
@@ -70,10 +72,10 @@ RESPONSE dstree::Index::build() {
     return FAILURE;
   }
 
-  leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare>(
-      Compare(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));
+  leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, CompareDecrNodeDist>(
+      CompareDecrNodeDist(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));
 
-  if (config_.get().require_neurofilter_) {
+  if (config_.get().require_neurofilter_ || config_.get().navigator_is_learned_) {
     train();
   }
 
@@ -213,7 +215,7 @@ struct SearchCache {
               pthread_mutex_t *answer_mutex,
               std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE,
                                                          std::vector<dstree::NODE_DISTNCE>,
-                                                         dstree::Compare>> leaf_min_heap,
+                                                         dstree::CompareDecrNodeDist>> leaf_min_heap,
               pthread_mutex_t *leaf_pq_mutex,
               ID_TYPE *visited_node_counter,
               ID_TYPE *visited_series_counter,
@@ -240,7 +242,9 @@ struct SearchCache {
   dstree::Answers *answer_;
   pthread_mutex_t *answer_mutex_;
 
-  std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE, std::vector<dstree::NODE_DISTNCE>, dstree::Compare>>
+  std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE,
+                                             std::vector<dstree::NODE_DISTNCE>,
+                                             dstree::CompareDecrNodeDist>>
       leaf_min_heap_;
   pthread_mutex_t *leaf_pq_mutex_;
 
@@ -258,23 +262,6 @@ void search_thread_F(const SearchCache &search_cache) {
   // WARN undefined behaviour
   std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
   VALUE_TYPE node2visit_lbdistance;
-  VALUE_TYPE local_nn_distance;
-
-  pthread_mutex_lock(search_cache.answer_mutex_);
-  VALUE_TYPE local_bsf = search_cache.answer_->get_bsf();
-  pthread_mutex_unlock(search_cache.answer_mutex_);
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-  pthread_mutex_lock(search_cache.leaf_pq_lock_);
-  spdlog::info("filter query {:d} thread {:d} initial bsf {:.3f} before {:d} nodes",
-               search_cache.query_id_,
-               search_cache.thread_id_,
-               local_bsf,
-               search_cache.leaf_min_heap_.get().size());
-  pthread_mutex_unlock(search_cache.leaf_pq_lock_);
-#endif
-#endif
 
   while (true) {
     pthread_mutex_lock(search_cache.leaf_pq_mutex_);
@@ -291,43 +278,27 @@ void search_thread_F(const SearchCache &search_cache) {
 
     // for a more precise bsf distance
     pthread_mutex_lock(search_cache.answer_mutex_);
-    local_bsf = search_cache.answer_->get_bsf();
+    VALUE_TYPE global_bsf = search_cache.answer_->get_bsf();
     pthread_mutex_unlock(search_cache.answer_mutex_);
 
     if (node_to_visit.get().has_filter()) {
-      local_nn_distance = node_to_visit.get().search(
-          search_cache.query_series_ptr_, search_cache.m256_fetch_cache_);
+      VALUE_TYPE local_nn_distance = node_to_visit.get().search_mt(
+          search_cache.query_series_ptr_, *search_cache.answer_, search_cache.answer_mutex_);
 
-      node_to_visit.get().push_filter_example(local_bsf, local_nn_distance, node2visit_lbdistance);
-    } else {
-      local_nn_distance = node_to_visit.get().search(
-          search_cache.query_series_ptr_, search_cache.m256_fetch_cache_, local_bsf);
-    }
+      node_to_visit.get().push_filter_example(global_bsf, local_nn_distance, node2visit_lbdistance);
 
-    pthread_mutex_lock(search_cache.log_mutex_);
+      pthread_mutex_lock(search_cache.log_mutex_);
+      *search_cache.visited_node_counter_ += 1;
+      *search_cache.visited_series_counter_ += node_to_visit.get().get_size();
+      pthread_mutex_unlock(search_cache.log_mutex_);
+    } else if (node2visit_lbdistance <= global_bsf) {
+      VALUE_TYPE local_nn_distance = node_to_visit.get().search_mt(
+          search_cache.query_series_ptr_, *search_cache.answer_, search_cache.answer_mutex_);
 
-    *search_cache.visited_node_counter_ += 1;
-    *search_cache.visited_series_counter_ += node_to_visit.get().get_size();
-
-    pthread_mutex_unlock(search_cache.log_mutex_);
-
-    if (local_nn_distance < local_bsf) {
-      pthread_mutex_lock(search_cache.answer_mutex_);
-      search_cache.answer_->push_bsf(local_nn_distance, node_to_visit.get().get_id());
-      pthread_mutex_unlock(search_cache.answer_mutex_);
-
-#ifdef DEBUG
-//#ifndef DEBUGGED
-      if (local_bsf > local_nn_distance - constant::EPSILON) {
-        spdlog::info("filter query {:d} thread {:d} update bsf {:.3f} after node {:d} series {:d}",
-                     search_cache.query_id_,
-                     search_cache.thread_id_,
-                     local_nn_distance,
-                     *search_cache.visited_node_counter_,
-                     *search_cache.visited_series_counter_);
-      }
-//#endif
-#endif
+      pthread_mutex_lock(search_cache.log_mutex_);
+      *search_cache.visited_node_counter_ += 1;
+      *search_cache.visited_series_counter_ += node_to_visit.get().get_size();
+      pthread_mutex_unlock(search_cache.log_mutex_);
     }
   }
 }
@@ -339,7 +310,14 @@ RESPONSE dstree::Index::filter_collect_mthread() {
   ID_TYPE visited_node_counter = 0;
   ID_TYPE visited_series_counter = 0;
 
-  auto answer = std::make_unique<dstree::Answers>(config_.get().n_nearest_neighbor_, -1);
+  std::unique_ptr<Answers> answer = nullptr;
+  if (config_.get().navigator_is_learned_) {
+    // TODO
+    assert(!config_.get().require_neurofilter_);
+    answer = std::make_unique<dstree::Answers>(config_.get().navigator_train_k_nearest_neighbor_, -1);
+  } else {
+    answer = std::make_unique<dstree::Answers>(config_.get().n_nearest_neighbor_, -1);
+  }
 
   std::unique_ptr<pthread_mutex_t> answer_mutex = std::make_unique<pthread_mutex_t>();
   std::unique_ptr<pthread_mutex_t> leaf_pq_mutex = std::make_unique<pthread_mutex_t>();
@@ -382,18 +360,16 @@ RESPONSE dstree::Index::filter_collect_mthread() {
       search_caches[thread_id].query_series_ptr_ = series_ptr;
     }
 
-    VALUE_TYPE local_nn_distance = resident_node.get().search(series_ptr, m256_fetch_cache);
-    resident_node.get().push_filter_example(answer->get_bsf(), local_nn_distance, 0);
+    VALUE_TYPE global_bsf_distance = answer->get_bsf();
+    VALUE_TYPE local_nn_distance = resident_node.get().search_mt(series_ptr,
+                                                                 std::ref(*answer.get()),
+                                                                 answer_mutex.get());
+    if (config_.get().require_neurofilter_) {
+      resident_node.get().push_filter_example(global_bsf_distance, local_nn_distance, 0);
+    }
 
     visited_node_counter += 1;
     visited_series_counter += resident_node.get().get_size();
-
-    if (answer->is_bsf(local_nn_distance)) {
-      spdlog::info("filter query {:d} update bsf {:.3f} after node {:d} series {:d}",
-                   query_id, local_nn_distance, visited_node_counter, visited_series_counter);
-
-      answer->push_bsf(local_nn_distance, resident_node.get().get_id());
-    }
 
     assert(node_stack.empty() && leaf_min_heap_.empty());
     node_stack.push(std::ref(*root_));
@@ -414,13 +390,6 @@ RESPONSE dstree::Index::filter_collect_mthread() {
       }
     }
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-    spdlog::info("filter query {:d} enqueued {:d} nodes",
-                 query_id, leaf_min_heap_.size());
-#endif
-#endif
-
     std::vector<std::thread> threads;
 
     for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_collect_nthread_; ++thread_id) {
@@ -432,11 +401,32 @@ RESPONSE dstree::Index::filter_collect_mthread() {
     }
 
 #ifdef DEBUG
-    //#ifndef DEBUGGED
+//#ifndef DEBUGGED
     spdlog::info("filter query {:d} visited {:d} nodes {:d} series",
                  query_id, visited_node_counter, visited_series_counter);
-    //#endif
+//#endif
 #endif
+
+    train_answers_.emplace_back(dstree::Answers(*answer));
+
+    ID_TYPE nnn_to_return = config_.get().n_nearest_neighbor_;
+    if (config_.get().navigator_is_learned_) {
+      nnn_to_return = config_.get().navigator_train_k_nearest_neighbor_;
+    }
+
+    while (!answer->empty()) {
+      auto answer_i = answer->pop_answer();
+
+      if (answer_i.node_id_ > 0) {
+        spdlog::info("query {:d} nn {:d} = {:.3f}, node {:d}",
+                     query_id, nnn_to_return, answer_i.nn_dist_, answer_i.node_id_);
+      } else {
+        spdlog::info("query {:d} nn {:d} = {:.3f}",
+                     query_id, nnn_to_return, answer_i.nn_dist_);
+      }
+
+      nnn_to_return -= 1;
+    }
   }
 
   std::free(m256_fetch_cache);
@@ -672,12 +662,21 @@ RESPONSE dstree::Index::train() {
   }
 
   // support difference devices for training and inference
-  if (config_.get().filter_train_is_gpu_) {
-    // TODO support multiple devices
-    device_ = std::make_unique<torch::Device>(torch::kCUDA,
-                                              static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
-  } else {
-    device_ = std::make_unique<torch::Device>(torch::kCPU);
+  if (config_.get().require_neurofilter_) {
+    if (config_.get().filter_train_is_gpu_) {
+      // TODO support multiple devices
+      device_ = std::make_unique<torch::Device>(torch::kCUDA,
+                                                static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
+    } else {
+      device_ = std::make_unique<torch::Device>(torch::kCPU);
+    }
+  } else if (config_.get().navigator_is_learned_) {
+    if (config_.get().navigator_is_gpu_) {
+      device_ = std::make_unique<torch::Device>(torch::kCUDA,
+                                                static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
+    } else {
+      device_ = std::make_unique<torch::Device>(torch::kCPU);
+    }
   }
 
   filter_train_query_tsr_ = torch::from_blob(filter_train_query_ptr_,
@@ -685,12 +684,14 @@ RESPONSE dstree::Index::train() {
                                              torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
   filter_train_query_tsr_ = filter_train_query_tsr_.to(*device_);
 
-  //
-  // initialize filters
-  ID_TYPE filter_id = 0;
-  filter_initialize(*root_, &filter_id);
+  if (config_.get().require_neurofilter_) {
+    //
+    // initialize filters
+    ID_TYPE filter_id = 0;
+    filter_initialize(*root_, &filter_id);
 
-  spdlog::info("initialized {:d} filters", filter_id);
+    spdlog::info("initialized {:d} filters", filter_id);
+  }
 
   //
   // collect filter training data, i.e., the bsf distances, nn distances, low-bound distances
@@ -700,24 +701,92 @@ RESPONSE dstree::Index::train() {
     filter_collect();
   }
 
-  //
-  // allocate filters among nodes (and activate them)
-  filter_allocate();
+  if (config_.get().require_neurofilter_) {
+    //
+    // allocate filters among nodes (and activate them)
+    filter_allocate();
 
-  // train all filter model
-  if (config_.get().filter_train_is_mthread_) {
-    filter_train_mthread();
-  } else {
-    filter_train();
+    // train all filter model
+    if (config_.get().filter_train_is_mthread_) {
+      filter_train_mthread();
+    } else {
+      filter_train();
+    }
+
+    // support difference devices for training and inference
+    if (config_.get().filter_infer_is_gpu_) {
+      // TODO support multiple devices
+      device_ = std::make_unique<torch::Device>(torch::kCUDA,
+                                                static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
+    } else {
+      device_ = std::make_unique<torch::Device>(torch::kCPU);
+    }
   }
 
-  // support difference devices for training and inference
-  if (config_.get().filter_infer_is_gpu_) {
-    // TODO support multiple devices
-    device_ = std::make_unique<torch::Device>(torch::kCUDA,
-                                              static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
-  } else {
-    device_ = std::make_unique<torch::Device>(torch::kCPU);
+  if (config_.get().navigator_is_learned_) {
+    leaf_nodes_.reserve(nleaf_);
+
+    auto node_pos_to_id = make_reserved<ID_TYPE>(nleaf_);
+    std::unordered_map<ID_TYPE, ID_TYPE> node_id_to_pos;
+    node_id_to_pos.reserve(nleaf_ * 2);
+
+    std::stack<std::reference_wrapper<dstree::Node>> node_cache;
+    node_cache.push(std::ref(*root_));
+
+    while (!node_cache.empty()) {
+      std::reference_wrapper<dstree::Node> node_to_visit = node_cache.top();
+      node_cache.pop();
+
+      if (node_to_visit.get().is_leaf()) {
+        leaf_nodes_.push_back(node_to_visit);
+
+        node_pos_to_id.push_back(node_to_visit.get().get_id());
+        node_id_to_pos[node_to_visit.get().get_id()] = leaf_nodes_.size() - 1;
+      } else {
+        for (auto child_node : node_to_visit.get()) {
+          node_cache.push(child_node);
+        }
+      }
+    }
+
+#ifdef DEBUG
+//#ifndef DEBUGGED
+    spdlog::debug("navigator nleaf_ = {:d}", nleaf_);
+//#endif
+#endif
+
+    auto nn_residence_distributions = make_reserved<VALUE_TYPE>(config_.get().filter_train_nexample_ * nleaf_);
+    for (ID_TYPE cell_i = 0; cell_i < config_.get().filter_train_nexample_ * nleaf_; ++cell_i) {
+      nn_residence_distributions.push_back(0);
+    }
+
+    for (ID_TYPE query_i = 0; query_i < config_.get().filter_train_nexample_; ++query_i) {
+      // use copy constructor to avoid destruct train_answers_
+      Answers answers = Answers(train_answers_[query_i]);
+
+      while (!answers.empty()) {
+        nn_residence_distributions[nleaf_ * query_i + node_id_to_pos[answers.pop_answer().node_id_]] += 1;
+      }
+    }
+
+    for (ID_TYPE cell_i = 0; cell_i < config_.get().filter_train_nexample_ * nleaf_; ++cell_i) {
+      nn_residence_distributions[cell_i] /= config_.get().navigator_train_k_nearest_neighbor_;
+    }
+
+#ifdef DEBUG
+    for (ID_TYPE query_i = 0; query_i < config_.get().filter_train_nexample_; ++query_i) {
+      spdlog::debug("navigator train query {:d} target = {:s}",
+                    query_i, upcite::array2str(nn_residence_distributions.data() + nleaf_ * query_i, nleaf_));
+    }
+#endif
+
+    navigator_ = std::make_unique<dstree::Navigator>(config_,
+                                                     node_pos_to_id,
+                                                     filter_train_query_tsr_,
+                                                     nn_residence_distributions,
+                                                     *device_);
+
+    navigator_->train();
   }
 
   return SUCCESS;
@@ -740,8 +809,8 @@ RESPONSE dstree::Index::load() {
   // TODO in-memory only; supports on-disk
   buffer_manager_->load_batch();
 
-  leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, Compare>(
-      Compare(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));
+  leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, CompareDecrNodeDist>(
+      CompareDecrNodeDist(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));
 
   if (config_.get().require_neurofilter_) {
     if (!config_.get().to_load_filters_) {
@@ -760,6 +829,10 @@ RESPONSE dstree::Index::load() {
         device_ = std::make_unique<torch::Device>(torch::kCPU);
       }
     }
+  }
+
+  if (config_.get().navigator_is_learned_) {
+    train();
   }
 
   return SUCCESS;
@@ -843,7 +916,11 @@ RESPONSE dstree::Index::search() {
       sketch_ptr = query_sketch_buffer + config_.get().sketch_length_ * query_id;
     }
 
-    search(query_id, series_ptr, sketch_ptr);
+    if (config_.get().navigator_is_learned_) {
+      search_navigated(query_id, series_ptr, sketch_ptr);
+    } else {
+      search(query_id, series_ptr, sketch_ptr);
+    }
   }
 
   return SUCCESS;
@@ -884,20 +961,18 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
 
     while (!leaf_min_heap_.empty()) {
       std::tie(node_to_visit, node2visit_lbdistance) = leaf_min_heap_.top();
+      leaf_min_heap_.pop();
 
 #ifdef DEBUG
 #ifndef DEBUGGED
-      MALAT_LOG(logger_.get().logger, trivial::debug) << boost::format(
-            "query %d node_id %d leaf_min_heap_.size %d node2visit_lbdistance %.3f bsf %.3f")
-            % answer->query_id_
-            % node_to_visit->get_id()
-            % leaf_min_heap_.size()
-            % node2visit_lbdistance
-            % answer->get_bsf();
+      // TODO debug
+      spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f}",
+                    answers.get()->query_id_,
+                    node_to_visit.get().get_id(),
+                    node2visit_lbdistance,
+                    answers->get_bsf());
 #endif
 #endif
-
-      leaf_min_heap_.pop();
 
       if (node_to_visit.get().is_leaf()) {
         if (visited_node_counter < config_.get().search_max_nnode_ &&
@@ -906,16 +981,6 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
             if (config_.get().examine_ground_truth_ || answers->is_bsf(node2visit_lbdistance)) {
               if (node_to_visit.get().has_active_filter()) {
                 VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-                spdlog::debug("query {:d} node_id {:d} d_pred_sq {:.3f} bsf {:.3f}",
-                              answer->query_id_,
-                              node_to_visit.get().get_id(),
-                              predicted_nn_distance,
-                              answer->get_bsf());
-#endif
-#endif
 
                 if (predicted_nn_distance > answers->get_bsf()) {
                   nfpruned_node_counter += 1;
@@ -935,6 +1000,17 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
 
           if (config_.get().examine_ground_truth_ || answers->is_bsf(child_lower_bound_EDsquare)) {
             leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
+          } else {
+#ifdef DEBUG
+#ifndef DEBUGGED
+            // TODO debug
+            spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f}",
+                          answers.get()->query_id_,
+                          child_node.get().get_id(),
+                          child_lower_bound_EDsquare,
+                          answers->get_bsf());
+#endif
+#endif
           }
         }
       }
@@ -948,6 +1024,144 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
     spdlog::info("query {:d} neurofilters pruned {:d} nodes {:d} series",
                  query_id, nfpruned_node_counter, nfpruned_series_counter);
   }
+
+  ID_TYPE nnn_to_return = config_.get().n_nearest_neighbor_;
+
+  while (!answers->empty()) {
+    auto answer = answers->pop_answer();
+
+    if (answer.node_id_ > 0) {
+      spdlog::info("query {:d} nn {:d} = {:.3f}, node {:d}",
+                   query_id, nnn_to_return, answer.nn_dist_, answer.node_id_);
+    } else {
+      spdlog::info("query {:d} nn {:d} = {:.3f}",
+                   query_id, nnn_to_return, answer.nn_dist_);
+    }
+
+    nnn_to_return -= 1;
+  }
+
+  if (nnn_to_return > 0) {
+    return FAILURE;
+  }
+
+  return SUCCESS;
+}
+
+RESPONSE dstree::Index::search_navigated(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr) {
+  VALUE_TYPE *route_ptr = series_ptr;
+  if (config_.get().is_sketch_provided_) {
+    route_ptr = sketch_ptr;
+  }
+
+  auto answers = std::make_shared<dstree::Answers>(config_.get().n_nearest_neighbor_, query_id);
+
+  if (config_.get().require_neurofilter_ || config_.get().navigator_is_learned_) {
+    filter_query_tsr_ = torch::from_blob(series_ptr,
+                                         {1, config_.get().series_length_},
+                                         torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+  }
+
+  std::reference_wrapper<dstree::Node> resident_node = std::ref(*root_);
+
+  while (!resident_node.get().is_leaf()) {
+    resident_node = resident_node.get().route(route_ptr);
+  }
+
+  ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
+  ID_TYPE nfpruned_node_counter = 0, nfpruned_series_counter = 0;
+
+  resident_node.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+
+  if (config_.get().is_exact_search_) {
+    auto node_prob = navigator_->infer(filter_query_tsr_);
+    auto node_distances = make_reserved<VALUE_TYPE>(nleaf_);
+
+    if (config_.get().navigator_is_combined_) {
+      for (ID_TYPE leaf_i = 0; leaf_i < nleaf_; ++leaf_i) {
+        if (leaf_nodes_[leaf_i].get().get_id() == resident_node.get().get_id()) {
+          node_distances.push_back(constant::MAX_VALUE);
+        } else {
+          node_distances.push_back(leaf_nodes_[leaf_i].get().cal_lower_bound_EDsquare(route_ptr));
+        }
+      }
+
+      VALUE_TYPE min_prob = constant::MAX_VALUE, max_prob = constant::MIN_VALUE;
+      for (ID_TYPE leaf_i = 0; leaf_i < nleaf_; ++leaf_i) {
+        if (node_prob[leaf_i] < min_prob) {
+          min_prob = node_prob[leaf_i];
+        } else if (node_prob[leaf_i] > max_prob) {
+          max_prob = node_prob[leaf_i];
+        }
+      }
+
+      for (ID_TYPE leaf_i = 0; leaf_i < nleaf_; ++leaf_i) {
+        node_prob[leaf_i] = (node_prob[leaf_i] - min_prob) / (max_prob - min_prob);
+      }
+
+      VALUE_TYPE min_lb_dist = constant::MAX_VALUE, max_lb_dist = constant::MIN_VALUE;
+      for (ID_TYPE leaf_i = 0; leaf_i < nleaf_; ++leaf_i) {
+        if (node_distances[leaf_i] < min_lb_dist) {
+          min_lb_dist = node_distances[leaf_i];
+        } else if (node_distances[leaf_i] > max_lb_dist && node_distances[leaf_i] < constant::MAX_VALUE / 2) {
+          max_lb_dist = node_distances[leaf_i];
+        }
+      }
+
+      for (ID_TYPE leaf_i = 0; leaf_i < nleaf_; ++leaf_i) {
+        node_prob[leaf_i] = config_.get().navigator_combined_lambda_ * node_prob[leaf_i]
+            + (1 - config_.get().navigator_combined_lambda_)
+                * (1 - (node_distances[leaf_i] - min_lb_dist) / (max_lb_dist - min_lb_dist));
+      }
+    }
+
+    auto node_pos_probs = make_reserved<std::tuple<ID_TYPE, VALUE_TYPE>>(nleaf_);
+
+    for (ID_TYPE leaf_i = 0; leaf_i < nleaf_; ++leaf_i) {
+      if (leaf_nodes_[leaf_i].get().get_id() != resident_node.get().get_id()) {
+        node_pos_probs.push_back(std::tuple<ID_TYPE, VALUE_TYPE>(leaf_i, node_prob[leaf_i]));
+      }
+    }
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+    spdlog::debug("query {:d} node_distances = {:s}",
+                  answers.get()->query_id_, upcite::array2str(node_distances.data(), nleaf_));
+
+    spdlog::debug("query {:d} node_prob = {:s}",
+                  answers.get()->query_id_, upcite::array2str(node_prob.data(), nleaf_));
+#endif
+#endif
+
+    std::sort(node_pos_probs.begin(), node_pos_probs.end(), dstree::compDecrProb);
+
+    for (ID_TYPE prob_i = 0; prob_i < node_pos_probs.size(); ++prob_i) {
+      ID_TYPE leaf_i = std::get<0>(node_pos_probs[prob_i]);
+      auto node_to_visit = leaf_nodes_[leaf_i];
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+      // TODO debug
+      spdlog::debug("query {:d} leaf_i {:d} ({:d}) dist {:.3f} prob {:.3f} ({:.3f}) bsf {:.3f}",
+                    answers.get()->query_id_,
+                    leaf_i, navigator_->get_id_from_pos(leaf_i),
+                    node_distances[leaf_i],
+                    std::get<1>(node_pos_probs[prob_i]), node_prob[leaf_i],
+                    answers->get_bsf());
+#endif
+#endif
+
+      if (visited_node_counter < config_.get().search_max_nnode_ &&
+          visited_series_counter < config_.get().search_max_nseries_) {
+        if (config_.get().examine_ground_truth_ || answers->is_bsf(node_distances[leaf_i])) {
+          node_to_visit.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+        }
+      }
+    }
+  }
+
+  spdlog::info("query {:d} visited {:d} nodes {:d} series",
+               query_id, visited_node_counter, visited_series_counter);
 
   ID_TYPE nnn_to_return = config_.get().n_nearest_neighbor_;
 

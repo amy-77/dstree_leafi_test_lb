@@ -4,12 +4,12 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(TARGET filter)
-add_library(${TARGET} SHARED filter.cc scheduler.cc conformal.cc model.cc)
+add_library(${TARGET} SHARED filter.cc conformal.cc filter_core.cc)
 
 set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_features(${TARGET} PRIVATE cxx_std_14)
-target_compile_options(${TARGET} PUBLIC -march=native -msse3 -msse4.2 -mavx -mavx2)
+#target_compile_options(${TARGET} PUBLIC -march=native -msse3 -msse4.2 -mavx -mavx2)
 
 target_link_libraries(${TARGET}
-        PRIVATE util common GSL::gsl GSL::gslcblas ${Boost_LIBRARIES} ${TORCH_LIBRARIES} pthread
+        PRIVATE model util common GSL::gsl GSL::gslcblas ${TORCH_LIBRARIES}
         )

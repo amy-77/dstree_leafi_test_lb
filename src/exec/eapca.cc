@@ -303,20 +303,6 @@ dstree::EAPCAEnvelope::EAPCAEnvelope(const Config &config,
     subsegment_lengths_ = parent_eapca_envelope.subsegment_lengths_;
   }
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-  if (logger != nullptr) {
-    MALAT_LOG(logger.logger, trivial::debug) << boost::format("nsegment_ = %d, segment_lengths_.size() = %d")
-          % nsegment_ % segment_lengths_.size();
-    MALAT_LOG(logger.logger, trivial::debug) << boost::format("nsubsegment_ = %d, subsegment_lengths_.size() = %d")
-          % nsubsegment_ % subsegment_lengths_.size();
-  }
-#endif
-
-  assert(nsegment_ == segment_lengths_.size());
-  assert(nsubsegment_ == subsegment_lengths_.size());
-#endif
-
   initialize_stats();
 }
 

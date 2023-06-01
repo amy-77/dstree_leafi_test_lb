@@ -54,22 +54,12 @@ dstree::Node::Node(dstree::Config &config,
   eapca_envelope_ = std::make_unique<EAPCAEnvelope>(eapca_envelope);
 }
 
-dstree::Node &dstree::Node::route(dstree::EAPCA &series_eapca) const {
+dstree::Node &dstree::Node::route(dstree::EAPCA &series_eapca, bool is_update_statistics) {
   ID_TYPE target_child_id;
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-  if (logger != nullptr) {
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format("before: vertical_split = %d, node %d - %d == series %d - %d")
-          % split_->is_vertical_split_
-          % eapca_envelope_->nsegment_
-          % eapca_envelope_->nsubsegment_
-          % series_eapca->nsegment_
-          % series_eapca->nsubsegment_;
+  if (is_update_statistics) {
+    eapca_envelope_->update(series_eapca);
   }
-#endif
-#endif
 
   if (split_->is_vertical_split_) {
     target_child_id = split_->route(series_eapca.get_subsegment_value(
@@ -80,20 +70,6 @@ dstree::Node &dstree::Node::route(dstree::EAPCA &series_eapca) const {
     target_child_id = split_->route(series_eapca.get_segment_value(
         split_->split_segment_id_, split_->horizontal_split_mode_ == MEAN));
   }
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-  if (logger != nullptr) {
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format("after: vertical_split = %d, node %d - %d == series %d - %d")
-          % split_->is_vertical_split_
-          % eapca_envelope_->nsegment_
-          % eapca_envelope_->nsubsegment_
-          % series_eapca->nsegment_
-          % series_eapca->nsubsegment_;
-  }
-#endif
-#endif
 
   return *children_[target_child_id];
 }
@@ -139,54 +115,11 @@ RESPONSE dstree::Node::insert(ID_TYPE series_id,
   // TODO optimize RESPONSE operators
   RESPONSE response = buffer_.get().insert(series_id);
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-  if (response == FAILURE && logger != nullptr) {
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format("node %d: %d - %d == series %d: %d - %d")
-          % id_
-          % eapca_envelope_->nsegment_
-          % eapca_envelope_->nsubsegment_
-          % series_id
-          % series_eapca->nsegment_
-          % series_eapca->nsubsegment_;
-  }
-#endif
-#endif
   response = static_cast<RESPONSE>(response || eapca_envelope_->update(series_eapca));
 
   if (response == SUCCESS) {
     nseries_ += 1;
-  } else {
-#ifdef DEBUG
-#ifndef DEBUGGED
-    if (logger != nullptr) {
-      MALAT_LOG(logger->logger, trivial::debug)
-        << boost::format("node %d: %d - %d == series %d: %d - %d")
-            % id_
-            % eapca_envelope_->nsegment_
-            % eapca_envelope_->nsubsegment_
-            % series_id
-            % series_eapca->nsegment_
-            % series_eapca->nsubsegment_;
-    }
-#endif
-#endif
-  }
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-  if (logger != nullptr) {
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format("id_ = %d, nseries_ = %d, buffer_->size() = %d")
-          % id_
-          % nseries_
-          % buffer_->size();
-  }
-
-  assert(nseries_ == buffer_->size());
-#endif
-#endif
+  } else {}
 
   return response;
 }
@@ -212,6 +145,8 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
 
     current_split->is_vertical_split_ = false;
 
+    //
+    // check horizontal split with mean
     current_split->horizontal_split_mode_ = MEAN;
     mean_width_children = mean_width / nchild;
     range_children = 0;
@@ -221,25 +156,6 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
     }
 
     quality_gain = range_parent - range_children / nchild;
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format(
-          "node_id = %d, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
-          % id_
-          % current_split->is_vertical_split_
-          % current_split->split_segment_id_
-          % current_split->split_subsegment_id_
-          % current_split->horizontal_split_mode_;
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format(
-          "quality_gain = %f, range_parent = %f, range_children / nchild = %f")
-          % quality_gain
-          % range_parent
-          % (range_children / nchild);
-#endif
-#endif
 
     if (quality_gain > best_so_far_quality_gain) {
       best_so_far_quality_gain = quality_gain;
@@ -253,22 +169,10 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
       }
 
       *split_ = *current_split;
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-      MALAT_LOG(logger->logger, trivial::debug)
-        << boost::format(
-            "node_id = %d, best_so_far_quality_gain = %f, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
-            % id_
-            % best_so_far_quality_gain
-            % current_split->is_vertical_split_
-            % current_split->split_segment_id_
-            % current_split->split_subsegment_id_
-            % current_split->horizontal_split_mode_;
-#endif
-#endif
     }
 
+    //
+    // check horizontal split with std
     current_split->horizontal_split_mode_ = STD;
     std_width_children = (max_std - eapca_envelope_->segment_min_stds_[segment_id]) / nchild;
     range_children = 0;
@@ -279,25 +183,6 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
     }
 
     quality_gain = range_parent - range_children / nchild;
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format(
-          "node_id = %d, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
-          % id_
-          % current_split->is_vertical_split_
-          % current_split->split_segment_id_
-          % current_split->split_subsegment_id_
-          % current_split->horizontal_split_mode_;
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format(
-          "quality_gain = %f, range_parent = %f, range_children / nchild = %f")
-          % quality_gain
-          % range_parent
-          % (range_children / nchild);
-#endif
-#endif
 
     if (quality_gain > best_so_far_quality_gain) {
       best_so_far_quality_gain = quality_gain;
@@ -311,20 +196,6 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
       }
 
       *split_ = *current_split;
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-      MALAT_LOG(logger->logger, trivial::debug)
-        << boost::format(
-            "node_id = %d, best_so_far_quality_gain = %f, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
-            % id_
-            % best_so_far_quality_gain
-            % current_split->is_vertical_split_
-            % current_split->split_segment_id_
-            % current_split->split_subsegment_id_
-            % current_split->horizontal_split_mode_;
-#endif
-#endif
     }
 
     current_split->is_vertical_split_ = true;
@@ -334,13 +205,15 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
          ++subsegment_id) {
       current_split->split_subsegment_id_ = subsegment_id;
 
-      mean_width =
-          eapca_envelope_->subsegment_max_means_[subsegment_id] - eapca_envelope_->subsegment_min_means_[subsegment_id];
+      mean_width = eapca_envelope_->subsegment_max_means_[subsegment_id]
+              - eapca_envelope_->subsegment_min_means_[subsegment_id];
       max_std = eapca_envelope_->subsegment_max_stds_[subsegment_id];
       subsegment_length = static_cast<VALUE_TYPE>(eapca_envelope_->subsegment_lengths_[subsegment_id]);
 
       range_parent = subsegment_length * (mean_width * mean_width + max_std * max_std);
 
+      //
+      // check vertical split with mean
       current_split->horizontal_split_mode_ = MEAN;
       mean_width_children = mean_width / nchild;
       range_children = 0;
@@ -350,25 +223,6 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
       }
 
       quality_gain = range_parent - range_children / nchild;
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-      MALAT_LOG(logger->logger, trivial::debug)
-        << boost::format(
-            "node_id = %d, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
-            % id_
-            % current_split->is_vertical_split_
-            % current_split->split_segment_id_
-            % current_split->split_subsegment_id_
-            % current_split->horizontal_split_mode_;
-      MALAT_LOG(logger->logger, trivial::debug)
-        << boost::format(
-            "quality_gain = %f, range_parent = %f, range_children / nchild = %f")
-            % quality_gain
-            % range_parent
-            % (range_children / nchild);
-#endif
-#endif
 
       if (quality_gain > best_so_far_quality_gain_vertical) {
         best_so_far_quality_gain_vertical = quality_gain;
@@ -383,22 +237,10 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
         }
 
         *split_ = *current_split;
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-        MALAT_LOG(logger->logger, trivial::debug)
-          << boost::format(
-              "node_id = %d, best_so_far_quality_gain = %f, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
-              % id_
-              % best_so_far_quality_gain
-              % current_split->is_vertical_split_
-              % current_split->split_segment_id_
-              % current_split->split_subsegment_id_
-              % current_split->horizontal_split_mode_;
-#endif
-#endif
       }
 
+      //
+      // check vertical split with std
       current_split->horizontal_split_mode_ = STD;
       std_width_children = (max_std - eapca_envelope_->subsegment_min_stds_[subsegment_id]) / nchild;
       range_children = 0;
@@ -409,25 +251,6 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
       }
 
       quality_gain = range_parent - range_children / nchild;
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-      MALAT_LOG(logger->logger, trivial::debug)
-        << boost::format(
-            "node_id = %d, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
-            % id_
-            % current_split->is_vertical_split_
-            % current_split->split_segment_id_
-            % current_split->split_subsegment_id_
-            % current_split->horizontal_split_mode_;
-      MALAT_LOG(logger->logger, trivial::debug)
-        << boost::format(
-            "quality_gain = %f, range_parent = %f, range_children / nchild = %f")
-            % quality_gain
-            % range_parent
-            % (range_children / nchild);
-#endif
-#endif
 
       if (quality_gain > best_so_far_quality_gain_vertical) {
         best_so_far_quality_gain_vertical = quality_gain;
@@ -442,24 +265,12 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
         }
 
         *split_ = *current_split;
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-        MALAT_LOG(logger->logger, trivial::debug)
-          << boost::format(
-              "node_id = %d, best_so_far_quality_gain = %f, is_vertical_split_ = %d, split_segment_id_ = %d, split_subsegment_id_ = %d, horizontal_split_mode_ = %d")
-              % id_
-              % best_so_far_quality_gain
-              % current_split->is_vertical_split_
-              % current_split->split_segment_id_
-              % current_split->split_subsegment_id_
-              % current_split->horizontal_split_mode_;
-#endif
-#endif
       }
     }
   }
 
+  //
+  // update split info
   split_->split_segment_offset_ = 0;
   if (split_->is_vertical_split_) {
     for (subsegment_id = 0; subsegment_id < split_->split_subsegment_id_; ++subsegment_id) {
@@ -484,89 +295,14 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
     children_.emplace_back(std::make_unique<dstree::Node>(config_, buffer_manager,
                                                           depth_ + 1, first_child_id + child_id,
                                                           child_eapca_envelope));
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format("child_id = %d, %d - %d -> %d - %d")
-          % (first_child_id + child_id)
-          % eapca_envelope_->nsegment_
-          % eapca_envelope_->nsubsegment_
-          % children_[child_id]->eapca_envelope_->nsegment_
-          % children_[child_id]->eapca_envelope_->nsubsegment_;
-#endif
-#endif
   }
-
-#ifdef DEBUG
-#ifndef DEBUGGED
-  for (ID_TYPE node_series_id = 0; node_series_id < buffer_->size(); node_series_id += 20) {
-    MALAT_LOG(logger->logger, trivial::debug)
-      << boost::format("%d(%d): %d %d %d %d %d - %d %d %d %d %d - %d %d %d %d %d - %d %d %d %d %d")
-          % node_series_id
-          % id_
-          % buffer_->get_offset(node_series_id)
-          % buffer_->get_offset(node_series_id + 1)
-          % buffer_->get_offset(node_series_id + 2)
-          % buffer_->get_offset(node_series_id + 3)
-          % buffer_->get_offset(node_series_id + 4)
-          % buffer_->get_offset(node_series_id + 5)
-          % buffer_->get_offset(node_series_id + 6)
-          % buffer_->get_offset(node_series_id + 7)
-          % buffer_->get_offset(node_series_id + 8)
-          % buffer_->get_offset(node_series_id + 9)
-          % buffer_->get_offset(node_series_id + 10)
-          % buffer_->get_offset(node_series_id + 11)
-          % buffer_->get_offset(node_series_id + 12)
-          % buffer_->get_offset(node_series_id + 13)
-          % buffer_->get_offset(node_series_id + 14)
-          % buffer_->get_offset(node_series_id + 15)
-          % buffer_->get_offset(node_series_id + 16)
-          % buffer_->get_offset(node_series_id + 17)
-          % buffer_->get_offset(node_series_id + 18)
-          % buffer_->get_offset(node_series_id + 19);
-  }
-#endif
-#endif
 
   for (ID_TYPE node_series_id = 0; node_series_id < buffer_.get().size(); ++node_series_id) {
     ID_TYPE series_batch_id = buffer_.get().get_offset(node_series_id);
 
-//#ifdef DEBUG
-//#ifndef DEBUGGED
-//    MALAT_LOG(logger->logger, trivial::debug)
-//      << boost::format("node %d(%d): %d - %d == series %d/%d: %d - %d")
-//          % id_
-//          % split_->is_vertical_split_
-//          % eapca_envelope_->nsegment_
-//          % eapca_envelope_->nsubsegment_
-//          % series_batch_id
-//          % node_series_id
-//          % buffer_manager->batch_eapca_[series_batch_id]->nsegment_
-//          % buffer_manager->batch_eapca_[series_batch_id]->nsubsegment_;
-//#endif
-//#endif
-
-    dstree::Node &target_child = route(buffer_manager.get_series_eapca(series_batch_id));
+    // statistics was already updated when they insert into the parent node
+    dstree::Node &target_child = route(buffer_manager.get_series_eapca(series_batch_id), false);
     target_child.insert(series_batch_id, buffer_manager.get_series_eapca(series_batch_id));
-
-//#ifdef DEBUG
-//#ifndef DEBUGGED
-//    MALAT_LOG(logger->logger, trivial::debug) << boost::format(
-//          "node %d(%d): %d - %d -> %d: %d - %d == series %d/%d: %d - %d")
-//          % id_
-//          % split_->is_vertical_split_
-//          % eapca_envelope_->nsegment_
-//          % eapca_envelope_->nsubsegment_
-//          % target_child->id_
-//          % target_child->eapca_envelope_->nsegment_
-//          % target_child->eapca_envelope_->nsubsegment_
-//          % series_batch_id
-//          % node_series_id
-//          % buffer_manager->batch_eapca_[series_batch_id]->nsegment_
-//          % buffer_manager->batch_eapca_[series_batch_id]->nsubsegment_;
-//#endif
-//#endif
   }
 
 #ifdef DEBUG

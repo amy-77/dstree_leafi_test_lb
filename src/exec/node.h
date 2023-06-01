@@ -36,7 +36,7 @@ class Node {
   ~Node() = default;
 
   Node &route(const VALUE_TYPE *series_ptr) const;
-  Node &route(dstree::EAPCA &series_eapca) const;
+  Node &route(dstree::EAPCA &series_eapca, bool is_update_statistics);
 
   RESPONSE enqueue_leaf(std::vector<std::reference_wrapper<Node>> &leaves);
 //  RESPONSE enqueue_children(std::vector<std::shared_ptr<Node>> &leaves);

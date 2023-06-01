@@ -99,14 +99,14 @@ RESPONSE dstree::Index::insert(ID_TYPE batch_series_id) {
   std::reference_wrapper<dstree::Node> target_node = std::ref(*root_);
 
   while (!target_node.get().is_leaf()) {
-    target_node = target_node.get().route(series_eapca);
+    target_node = target_node.get().route(series_eapca, true);
   }
 
   if (target_node.get().is_full()) {
     target_node.get().split(*buffer_manager_, nnode_);
     nnode_ += config_.get().node_nchild_, nleaf_ += config_.get().node_nchild_ - 1;
 
-    target_node = target_node.get().route(series_eapca);
+    target_node = target_node.get().route(series_eapca, true);
   }
 
   return target_node.get().insert(batch_series_id, series_eapca);
@@ -172,7 +172,8 @@ RESPONSE dstree::Index::filter_collect() {
       if (node_to_visit.get().is_leaf()) {
         if (node_to_visit.get().get_id() != resident_node.get().get_id()) {
           local_nn_distance = node_to_visit.get().search(series_ptr, m256_fetch_cache);
-          node_to_visit.get().push_filter_example(answer->get_bsf(), local_nn_distance, node2visit_lbdistance);
+          node_to_visit.get().push_filter_example(answer->get_bsf(), local_nn_distance,
+                                                  node2visit_lbdistance);
 
           visited_node_counter += 1;
           visited_series_counter += node_to_visit.get().get_size();
@@ -242,10 +243,8 @@ struct SearchCache {
   dstree::Answers *answer_;
   pthread_mutex_t *answer_mutex_;
 
-  std::reference_wrapper<std::priority_queue<dstree::NODE_DISTNCE,
-                                             std::vector<dstree::NODE_DISTNCE>,
-                                             dstree::CompareDecrNodeDist>>
-      leaf_min_heap_;
+  std::reference_wrapper<std::priority_queue<
+      dstree::NODE_DISTNCE, std::vector<dstree::NODE_DISTNCE>, dstree::CompareDecrNodeDist>> leaf_min_heap_;
   pthread_mutex_t *leaf_pq_mutex_;
 
   ID_TYPE *visited_node_counter_;
@@ -482,6 +481,7 @@ struct TrainCache {
       stream_(stream),
       filter_cache_(filter_cache),
       filter_cache_mutex_(filter_cache_mutex) {}
+
   ~TrainCache() = default;
 
   ID_TYPE thread_id_;
@@ -576,8 +576,8 @@ RESPONSE dstree::Index::train() {
   //
   // fetch or generate training queries
   //
-  auto query_nbytes = static_cast<ID_TYPE>(
-      sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().filter_train_nexample_;
+  auto query_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
+      * config_.get().series_length_ * config_.get().filter_train_nexample_;
   filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_nbytes));
 
   if (!fs::exists(config_.get().filter_query_filepath_)) {
@@ -963,16 +963,15 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
       std::tie(node_to_visit, node2visit_lbdistance) = leaf_min_heap_.top();
       leaf_min_heap_.pop();
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-      // TODO debug
-      spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f}",
-                    answers.get()->query_id_,
-                    node_to_visit.get().get_id(),
-                    node2visit_lbdistance,
-                    answers->get_bsf());
-#endif
-#endif
+//#ifdef DEBUG
+////#ifndef DEBUGGED
+//      spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f}",
+//                    answers.get()->query_id_,
+//                    node_to_visit.get().get_id(),
+//                    node2visit_lbdistance,
+//                    answers->get_bsf());
+////#endif
+//#endif
 
       if (node_to_visit.get().is_leaf()) {
         if (visited_node_counter < config_.get().search_max_nnode_ &&
@@ -986,10 +985,12 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
                   nfpruned_node_counter += 1;
                   nfpruned_series_counter += node_to_visit.get().get_size();
                 } else {
-                  node_to_visit.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+                  node_to_visit.get().search(series_ptr, *answers, visited_node_counter,
+                                             visited_series_counter);
                 }
               } else {
-                node_to_visit.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+                node_to_visit.get().search(series_ptr, *answers, visited_node_counter,
+                                           visited_series_counter);
               }
             }
           }
@@ -998,20 +999,38 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
         for (auto child_node : node_to_visit.get()) {
           VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(route_ptr);
 
-          if (config_.get().examine_ground_truth_ || answers->is_bsf(child_lower_bound_EDsquare)) {
-            leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
-          } else {
-#ifdef DEBUG
-#ifndef DEBUGGED
-            // TODO debug
-            spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f}",
-                          answers.get()->query_id_,
-                          child_node.get().get_id(),
-                          child_lower_bound_EDsquare,
-                          answers->get_bsf());
-#endif
-#endif
-          }
+          // TODO fix bug: parent LB dist > child LB dist
+          // current workaround: do not early prune
+          leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
+
+//          if (config_.get().examine_ground_truth_ || answers->is_bsf(child_lower_bound_EDsquare)) {
+//            leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
+//          } else {
+//#ifdef DEBUG
+////#ifndef DEBUGGED
+//            spdlog::debug("query {:d} node_i {:d} ({:b}) dist {:.3f} bsf {:.3f}",
+//                          answers.get()->query_id_,
+//                          child_node.get().get_id(),
+//                          child_node.get().is_leaf(),
+//                          child_lower_bound_EDsquare,
+//                          answers->get_bsf());
+//
+//            if (!child_node.get().is_leaf()) {
+//              for (auto debug_child_node : child_node.get()) {
+//                VALUE_TYPE debug_EDsquare = debug_child_node.get().cal_lower_bound_EDsquare(route_ptr);
+//
+//                spdlog::debug("query {:d} node_i {:d} ({:d}, {:b}) dist {:.3f} bsf {:.3f}",
+//                              answers.get()->query_id_,
+//                              debug_child_node.get().get_id(),
+//                              child_node.get().get_id(),
+//                              debug_child_node.get().is_leaf(),
+//                              debug_EDsquare,
+//                              answers->get_bsf());
+//              }
+//            }
+////#endif
+//#endif
+//          }
         }
       }
     }
@@ -1124,13 +1143,13 @@ RESPONSE dstree::Index::search_navigated(ID_TYPE query_id, VALUE_TYPE *series_pt
     }
 
 #ifdef DEBUG
-#ifndef DEBUGGED
+//#ifndef DEBUGGED
     spdlog::debug("query {:d} node_distances = {:s}",
                   answers.get()->query_id_, upcite::array2str(node_distances.data(), nleaf_));
 
     spdlog::debug("query {:d} node_prob = {:s}",
                   answers.get()->query_id_, upcite::array2str(node_prob.data(), nleaf_));
-#endif
+//#endif
 #endif
 
     std::sort(node_pos_probs.begin(), node_pos_probs.end(), dstree::compDecrProb);
@@ -1139,17 +1158,16 @@ RESPONSE dstree::Index::search_navigated(ID_TYPE query_id, VALUE_TYPE *series_pt
       ID_TYPE leaf_i = std::get<0>(node_pos_probs[prob_i]);
       auto node_to_visit = leaf_nodes_[leaf_i];
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-      // TODO debug
-      spdlog::debug("query {:d} leaf_i {:d} ({:d}) dist {:.3f} prob {:.3f} ({:.3f}) bsf {:.3f}",
-                    answers.get()->query_id_,
-                    leaf_i, navigator_->get_id_from_pos(leaf_i),
-                    node_distances[leaf_i],
-                    std::get<1>(node_pos_probs[prob_i]), node_prob[leaf_i],
-                    answers->get_bsf());
-#endif
-#endif
+//#ifdef DEBUG
+////#ifndef DEBUGGED
+//      spdlog::debug("query {:d} leaf_i {:d} ({:d}) dist {:.3f} prob {:.3f} ({:.3f}) bsf {:.3f}",
+//                    answers.get()->query_id_,
+//                    leaf_i, navigator_->get_id_from_pos(leaf_i),
+//                    node_distances[leaf_i],
+//                    std::get<1>(node_pos_probs[prob_i]), node_prob[leaf_i],
+//                    answers->get_bsf());
+////#endif
+//#endif
 
       if (visited_node_counter < config_.get().search_max_nnode_ &&
           visited_series_counter < config_.get().search_max_nseries_) {

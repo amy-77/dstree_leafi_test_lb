@@ -750,9 +750,9 @@ RESPONSE dstree::Index::train() {
     }
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
     spdlog::debug("navigator nleaf_ = {:d}", nleaf_);
-//#endif
+#endif
 #endif
 
     auto nn_residence_distributions = make_reserved<VALUE_TYPE>(config_.get().filter_train_nexample_ * nleaf_);
@@ -795,6 +795,9 @@ RESPONSE dstree::Index::train() {
 RESPONSE dstree::Index::load() {
   ID_TYPE ifs_buf_size = sizeof(ID_TYPE) * config_.get().leaf_max_nseries_ * 2; // 2x expanded for safety
   void *ifs_buf = std::malloc(ifs_buf_size);
+
+  nnode_ = 0;
+  nleaf_ = 0;
 
   RESPONSE status = root_->load(ifs_buf, std::ref(*buffer_manager_), nnode_, nleaf_);
 

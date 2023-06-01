@@ -34,11 +34,11 @@ RESPONSE dstree::Navigator::train() {
   ID_TYPE train_size = nn_residence_distributions_.size() / node_id_map_.size();
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
   spdlog::debug("navigator nnode = {:d}", nnode);
   spdlog::debug("navigator train_size = {:d}", train_size);
   spdlog::debug("navigator config_.get().filter_train_nexample_ = {:d}", config_.get().filter_train_nexample_);
-//#endif
+#endif
 #endif
 
   torch::Tensor train_target_tsr = torch::from_blob(nn_residence_distributions_.data(),
@@ -61,14 +61,14 @@ RESPONSE dstree::Navigator::train() {
       valid_dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
   spdlog::debug("navigator train_data = [{:d}, {:d}]", train_data.size(0), train_data.size(1));
   spdlog::debug("navigator train_target = [{:d}, {:d}]", train_target.size(0), train_target.size(1));
   spdlog::debug("navigator train_dataset = [{:d}]", train_dataset.size().value());
   spdlog::debug("navigator valid_data = [{:d}, {:d}]", valid_data.size(0), valid_data.size(1));
   spdlog::debug("navigator valid_target = [{:d}, {:d}]", valid_target.size(0), valid_target.size(1));
   spdlog::debug("navigator valid_dataset = [{:d}]", valid_dataset.size().value());
-//#endif
+#endif
 #endif
 
   model_ = std::make_shared<dstree::MLPNavigator>(config_.get().series_length_, nnode);
@@ -80,13 +80,13 @@ RESPONSE dstree::Navigator::train() {
   torch::nn::MSELoss mse_loss(torch::nn::MSELossOptions().reduction(torch::kMean));
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
   spdlog::debug("navigator config_.get().filter_train_nepoch_ = {:d}", config_.get().filter_train_nepoch_);
   spdlog::debug("navigator num_train_examples = {:d}", num_train_examples);
   spdlog::debug("navigator config_.get().filter_train_batchsize_ = {:d}", config_.get().filter_train_batchsize_);
   spdlog::debug("navigator num_train_examples / config_.get().filter_train_batchsize_ + 1 = {:d}",
                 num_train_examples / config_.get().filter_train_batchsize_ + 1);
-//#endif
+#endif
 #endif
 
 #ifdef DEBUG

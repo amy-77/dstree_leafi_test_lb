@@ -510,9 +510,6 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
-    spdlog::debug("allocator nn_distances.size = {:d}", nn_distances.size());
-    spdlog::debug("allocator nn_filter_ids.size = {:d}", nn_filter_ids.size());
-
     spdlog::debug("allocator nn_distances = {:s}",
                   upcite::array2str(nn_distances.data(), num_conformal_examples));
     spdlog::debug("allocator nn_filter_ids = {:s}",

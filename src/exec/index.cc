@@ -543,9 +543,9 @@ RESPONSE dstree::Index::filter_train_mthread() {
   }
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+#ifndef DEBUGGED
   spdlog::debug("indexing filters.size = {:d}", filters.size());
-//#endif
+#endif
 #endif
 
   std::vector<std::unique_ptr<TrainCache>> train_caches;

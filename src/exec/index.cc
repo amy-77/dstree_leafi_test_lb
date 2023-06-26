@@ -542,6 +542,12 @@ RESPONSE dstree::Index::filter_train_mthread() {
     }
   }
 
+#ifdef DEBUG
+//#ifndef DEBUGGED
+  spdlog::debug("indexing filters.size = {:d}", filters.size());
+//#endif
+#endif
+
   std::vector<std::unique_ptr<TrainCache>> train_caches;
 
   for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {
@@ -704,7 +710,7 @@ RESPONSE dstree::Index::train() {
   if (config_.get().require_neurofilter_) {
     //
     // allocate filters among nodes (and activate them)
-    filter_allocate();
+    filter_allocate(true);
 
     // train all filter model
     if (config_.get().filter_train_is_mthread_) {

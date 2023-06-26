@@ -464,12 +464,13 @@ dstree::Config::Config(int argc, char *argv[]) :
       exit(-1);
     }
 
-    if (require_neurofilter_) {
+    if (require_neurofilter_ && to_load_filters_) {
       if (load_filters_folderpath_.empty()) {
         load_filters_folderpath_ = index_load_folderpath_ + "filter/";
       } else if (!boost::algorithm::ends_with(load_filters_folderpath_, "/")) {
         load_filters_folderpath_ += "/";
       }
+
       if (!fs::is_directory(load_filters_folderpath_)) {
         std::cout << "Empty load_filters_folderpath found: " << load_filters_folderpath_ << std::endl;
         exit(-1);

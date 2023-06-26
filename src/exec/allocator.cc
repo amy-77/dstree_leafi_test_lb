@@ -428,11 +428,11 @@ RESPONSE dstree::Allocator::assign() {
                  available_gpu_memory_mb_, gpu_free_mb);
   }
 
+  VALUE_TYPE allocated_gpu_memory_mb = 0;
+  ID_TYPE allocated_filters_count = 0;
+
   if (config_.get().filter_allocate_is_gain_) {
     evaluate();
-
-    VALUE_TYPE allocated_gpu_memory_mb = 0;
-    ID_TYPE allocated_filters_count = 0;
 
     if (candidate_model_settings_.size() == 1) {
       std::sort(filter_infos_.begin(), filter_infos_.end(), dstree::compDecreFilterScore);
@@ -450,9 +450,6 @@ RESPONSE dstree::Allocator::assign() {
     } else {
       // TODO knapsack solver
     }
-
-    spdlog::info("allocator assigned {:d} models of {:.3f}mb/{:.3f}mb gpu memory",
-                 allocated_filters_count, allocated_gpu_memory_mb, available_gpu_memory_mb_);
   } else { // default: implant the default model to all leaf nodes
     std::sort(filter_infos_.begin(), filter_infos_.end(), dstree::compDecreFilterNSeries);
 
@@ -466,11 +463,16 @@ RESPONSE dstree::Allocator::assign() {
       }
 
       for (auto &filter_info : filter_infos_) {
-        filter_info.model_setting = candidate_model_settings_[0];
+        if (filter_info.node_.get().activate_filter(candidate_model_settings_[0]) == SUCCESS) {
+          allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
+          allocated_filters_count += 1;
+        }
       }
     }
   }
 
+  spdlog::info("allocator assigned {:d} models of {:.3f}mb/{:.3f}mb gpu memory",
+               allocated_filters_count, allocated_gpu_memory_mb, available_gpu_memory_mb_);
   return SUCCESS;
 }
 
@@ -508,6 +510,9 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
+    spdlog::debug("allocator nn_distances.size = {:d}", nn_distances.size());
+    spdlog::debug("allocator nn_filter_ids.size = {:d}", nn_filter_ids.size());
+
     spdlog::debug("allocator nn_distances = {:s}",
                   upcite::array2str(nn_distances.data(), num_conformal_examples));
     spdlog::debug("allocator nn_filter_ids = {:s}",

@@ -825,7 +825,6 @@ RESPONSE dstree::Index::load() {
     if (!config_.get().to_load_filters_) {
       train();
     } else {
-      //
       // initialize allocator for setting conformal intervals
       filter_allocate(false);
 

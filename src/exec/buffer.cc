@@ -20,13 +20,15 @@ dstree::Buffer::Buffer(bool is_on_disk,
                        ID_TYPE capacity,
                        ID_TYPE series_length,
                        VALUE_TYPE *global_buffer,
-                       std::string filepath) :
+                       std::string dump_filepath,
+                       std::string load_filepath) :
     is_on_disk_(is_on_disk),
     capacity_(capacity),
     series_length_(series_length),
     global_buffer_(global_buffer),
     local_buffer_(nullptr),
-    filepath_(std::move(filepath)),
+    dump_filepath_(std::move(dump_filepath)),
+    load_filepath_(std::move(load_filepath)),
     size_(0),
     next_series_id_(0) {
   offsets_.reserve(16);
@@ -45,15 +47,15 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
       ID_TYPE local_buffer_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * series_length_ * size_;
       local_buffer_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), local_buffer_nbytes));
 
-      if (!fs::exists(filepath_)) {
-        spdlog::error("node file {:s} does not exist", filepath_);
+      if (!fs::exists(load_filepath_)) {
+        spdlog::error("node file {:s} does not exist", load_filepath_);
 
         return nullptr;
       }
 
-      std::ifstream fin(filepath_, std::ios::in | std::ios::binary);
+      std::ifstream fin(load_filepath_, std::ios::in | std::ios::binary);
       if (!fin.good()) {
-        spdlog::error("node file {:s} cannot open", filepath_);
+        spdlog::error("node file {:s} cannot open", load_filepath_);
 
         return nullptr;
       }
@@ -61,7 +63,7 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
       fin.read(reinterpret_cast<char *>(local_buffer_), local_buffer_nbytes);
 
       if (fin.fail()) {
-        spdlog::error("node buffer cannot read {:d} bytes from {:s}", local_buffer_nbytes, filepath_);
+        spdlog::error("node buffer cannot read {:d} bytes from {:s}", local_buffer_nbytes, load_filepath_);
 
         return nullptr;
       }
@@ -112,7 +114,7 @@ RESPONSE dstree::Buffer::insert(ID_TYPE offset) {
 
   if (size() > capacity_) {
     // TODO
-    spdlog::error("{:s}: nseries > capacity", fs::path(filepath_).filename().string());
+    spdlog::error("{:s}: nseries > capacity", fs::path(dump_filepath_).filename().string());
 
     return FAILURE;
   }
@@ -129,7 +131,7 @@ RESPONSE dstree::Buffer::flush(VALUE_TYPE *load_buffer, VALUE_TYPE *flush_buffer
 
     }
 
-    std::ofstream fout(filepath_, std::ios::binary | std::ios_base::app);
+    std::ofstream fout(dump_filepath_, std::ios::binary | std::ios_base::app);
     fout.write(reinterpret_cast<char *>(flush_buffer), series_nbytes * size());
     fout.close();
 
@@ -160,7 +162,7 @@ RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
 RESPONSE dstree::Buffer::dump() const {
   // TODO support dump in batches
 
-  std::ofstream buffer_ofs(filepath_, std::ios::out | std::ios::binary);
+  std::ofstream buffer_ofs(dump_filepath_, std::ios::out | std::ios::binary);
 //  assert(buffer_fos.is_open());
 
   buffer_ofs.write(reinterpret_cast<const char *>(&size_), sizeof(ID_TYPE));
@@ -175,7 +177,7 @@ RESPONSE dstree::Buffer::dump() const {
 RESPONSE dstree::Buffer::load(void *ifs_buf) {
   // TODO support load in batches
 
-  std::ifstream buffer_ifs(filepath_, std::ios::in | std::ios::binary);
+  std::ifstream buffer_ifs(load_filepath_, std::ios::in | std::ios::binary);
 //  assert(buffer_ifs.is_open());
 
   auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
@@ -243,16 +245,20 @@ dstree::BufferManager::~BufferManager() {
 
 dstree::Buffer &dstree::BufferManager::create_node_buffer(ID_TYPE node_id) {
   auto buffer_id = static_cast<ID_TYPE>(node_buffers_.size());
-  std::string buffer_filepath = (config_.get().to_load_index_ ? config_.get().load_data_folderpath_ :
-                                 config_.get().dump_data_folderpath_)
-      + std::to_string(node_id) + config_.get().index_dump_file_postfix_;
+  std::string buffer_filepath = config_.get().dump_data_folderpath_ + std::to_string(node_id) + config_.get().index_dump_file_postfix_;
+
+  std::string load_filepath = buffer_filepath;
+  if (config_.get().to_load_index_) {
+    load_filepath = config_.get().load_data_folderpath_ + std::to_string(node_id) + config_.get().index_dump_file_postfix_;
+  }
 
   node_buffers_.emplace_back(std::make_unique<dstree::Buffer>(
       config_.get().on_disk_,
       config_.get().leaf_max_nseries_,
       config_.get().series_length_,
       batch_load_buffer_,
-      buffer_filepath));
+      buffer_filepath,
+      load_filepath));
 
   node_to_buffer_[node_id] = buffer_id;
   buffer_to_node_[buffer_id] = node_id;

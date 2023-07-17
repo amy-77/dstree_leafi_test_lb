@@ -26,7 +26,8 @@ class Buffer {
          ID_TYPE capacity,
          ID_TYPE series_length,
          VALUE_TYPE *global_buffer,
-         std::string filepath);
+         std::string dump_filepath,
+         std::string load_filepath);
   ~Buffer();
 
   RESPONSE insert(ID_TYPE offset);
@@ -56,7 +57,8 @@ class Buffer {
 
   ID_TYPE next_series_id_;
 
-  std::string filepath_; // with node.id_
+  std::string load_filepath_; // with node.id_
+  std::string dump_filepath_;
 };
 
 class BufferManager {

@@ -43,22 +43,22 @@ struct MODEL_SETTING {
 
     gpu_mem_mb = -1;
 
-    gpu_ms_per_series = -1;
-    cpu_ms_per_series = -1;
+    gpu_ms_per_query = -1;
+    cpu_ms_per_query = -1;
 
     pruning_prob = 0;
   };
 
-  explicit MODEL_SETTING(const std::string& setting_str, std::string delim = "_") {
+  explicit MODEL_SETTING(const std::string &setting_str, std::string delim = "_") {
     model_setting_str = setting_str;
 
     std::vector<std::string> setting_segments = upcite::split_str(setting_str, delim);
 
 #ifdef DEBUG
-    //#ifndef DEBUGGED
+#ifndef DEBUGGED
     spdlog::debug("model_setting {:d} segments in {:s}",
                   setting_segments.size(), setting_str);
-    //#endif
+#endif
 #endif
 
     // coding-version_model-type_num-layer_dim-layer_skip-connected, e.g., v0_mlp_3_256_f
@@ -82,9 +82,8 @@ struct MODEL_SETTING {
     }
 
     gpu_mem_mb = -1;
-
-    gpu_ms_per_series = -1;
-    cpu_ms_per_series = -1;
+    gpu_ms_per_query = -1;
+    cpu_ms_per_query = -1;
 
     pruning_prob = 0;
   };
@@ -99,9 +98,8 @@ struct MODEL_SETTING {
   bool has_skip_connections;
 
   VALUE_TYPE gpu_mem_mb;
-
-  VALUE_TYPE gpu_ms_per_series;
-  VALUE_TYPE cpu_ms_per_series;
+  double_t gpu_ms_per_query;
+  double_t cpu_ms_per_query;
 
   VALUE_TYPE pruning_prob;
 };

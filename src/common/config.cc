@@ -87,16 +87,20 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_model_setting_str_(""),
     filter_candidate_settings_filepath_(""),
     filter_allocate_is_gain_(false),
+    filter_node_size_threshold_(0),
     filter_conformal_recall_(-1),
     filter_conformal_adjust_confidence_by_recall_(false),
     filter_conformal_is_smoothen_(false),
     filter_conformal_smoothen_method_("spline"),
     filter_conformal_smoothen_core_("steffen"),
     filter_trial_confidence_level_(0.95),
-    filter_trial_iterations_(10000),
+    filter_trial_iterations_(20000),
     filter_trial_nnode_(32),
-    filter_trial_filter_preselection_size_threshold_(8),
-    allocator_cpu_trial_iterations_(32),
+    filter_trial_filter_preselection_size_threshold_(64),
+    filter_retrain_(false),
+    filter_reallocate_single_(false),
+    filter_reallocate_multi_(false),
+    allocator_cpu_trial_iterations_(10000),
     navigator_is_learned_(false),
     navigator_train_k_nearest_neighbor_(5),
     navigator_is_combined_(false),
@@ -231,6 +235,8 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Filter model candidate model setting filepath")
       ("filter_allocate_is_gain", po::bool_switch(&filter_allocate_is_gain_)->default_value(false),
        "Whether to allocate filters based on the expected runtime gain (default: false, i.e., by size)")
+      ("filter_node_size_threshold", po::value<ID_TYPE>(&filter_node_size_threshold_)->default_value(0),
+       "Filter node size threshold (default: 0)")
       ("filter_conformal_recall", po::value<VALUE_TYPE>(&filter_conformal_recall_)->default_value(-1),
        "Filter conformal recall level ([0, 1])")
       ("filter_conformal_is_smoothened", po::bool_switch(&filter_conformal_is_smoothen_)->default_value(false),
@@ -245,8 +251,8 @@ dstree::Config::Config(int argc, char *argv[]) :
        po::value<VALUE_TYPE>(&filter_trial_confidence_level_)->default_value(0.95),
        "Filter conformal confidence level for allocator trial runs (default: 0.95)")
       ("filter_trial_iterations",
-       po::value<ID_TYPE>(&filter_trial_iterations_)->default_value(10000),
-       "Filter no. queries for model speed test (default: 10000)")
+       po::value<ID_TYPE>(&filter_trial_iterations_)->default_value(20000),
+       "Filter no. queries for model speed test (default: 20000)")
       ("filter_trial_filter_preselection_size_threshold",
        po::value<ID_TYPE>(&filter_trial_filter_preselection_size_threshold_)->default_value(8),
        "Filter size threshold to run trials (default: 8)")
@@ -254,8 +260,8 @@ dstree::Config::Config(int argc, char *argv[]) :
        po::value<ID_TYPE>(&filter_trial_nnode_)->default_value(32),
        "Filter size threshold to run trials (default: 32)")
       ("allocator_cpu_trial_iterations",
-       po::value<ID_TYPE>(&allocator_cpu_trial_iterations_)->default_value(32),
-       "Allocator no. full nodes for cpu time estimation (default: 32)")
+       po::value<ID_TYPE>(&allocator_cpu_trial_iterations_)->default_value(10000),
+       "Allocator no. full nodes for cpu time estimation (default: 10000)")
       ("navigator_is_learned",
        po::bool_switch(&navigator_is_learned_)->default_value(false),
        "Whether the leaf node visiting order is learned")
@@ -273,7 +279,16 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Whether to train nagivator on GPU (other on CPU; default: CPU)")
       ("navigator_train_val_split",
        po::value<VALUE_TYPE>(&navigator_train_val_split_)->default_value(0.9),
-       "Navigator train train/val split ratio");
+       "Navigator train train/val split ratio")
+      ("filter_retrain_",
+       po::bool_switch(&filter_retrain_)->default_value(false),
+       "Whether to (re-assign and) re-train filters")
+      ("filter_reallocate_single",
+       po::bool_switch(&filter_reallocate_single_)->default_value(false),
+       "Whether to re-allocate the learned filters")
+      ("filter_reallocate_multi",
+       po::bool_switch(&filter_reallocate_multi_)->default_value(false),
+       "Whether to re-allocate the learned filters");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -481,6 +496,19 @@ dstree::Config::Config(int argc, char *argv[]) :
     }
   }
 
+  if (filter_retrain_ || filter_reallocate_single_ || filter_reallocate_multi_) {
+    assert(to_load_index_ && to_load_filters_);
+
+    if (filter_retrain_) {
+      filter_reallocate_single_ = false;
+      filter_reallocate_multi_ = false;
+
+      assert(fs::is_regular_file(filter_query_filepath_));
+    } else {
+      assert(!(filter_reallocate_single_ && filter_reallocate_multi_));
+    }
+  }
+
   if (require_neurofilter_ && navigator_is_learned_) {
     // TODO support
     std::cout << "Learned filters and learned navigators are not supported at the same time yet" << std::endl;
@@ -592,6 +620,14 @@ void dstree::Config::log() {
   spdlog::info("filter_conformal_smoothen_core = {:s}", filter_conformal_smoothen_core_);
 
   spdlog::info("filter_trial_confidence_level = {:.6f}", filter_trial_confidence_level_);
+  spdlog::info("filter_trial_iterations = {:d}", filter_trial_iterations_);
+  spdlog::info("filter_trial_nnode = {:d}", filter_trial_nnode_);
+  spdlog::info("filter_trial_filter_preselection_size_threshold_ = {:d}", filter_trial_filter_preselection_size_threshold_);
+  spdlog::info("allocator_cpu_trial_iterations = {:d}", allocator_cpu_trial_iterations_);
+
+  spdlog::info("filter_retrain = {:b}", filter_retrain_);
+  spdlog::info("filter_reallocate_single = {:b}", filter_reallocate_single_);
+  spdlog::info("filter_reallocate_multi = {:b}", filter_reallocate_multi_);
 
   spdlog::info("navigator_is_learned = {:b}", navigator_is_learned_);
   spdlog::info("navigator_train_k_nearest_neighbor = {:d}", navigator_train_k_nearest_neighbor_);

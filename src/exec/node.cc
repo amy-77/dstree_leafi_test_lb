@@ -8,6 +8,7 @@
 #include <iostream>
 #include <fstream>
 #include <utility>
+#include <memory>
 
 #include <spdlog/spdlog.h>
 #include <boost/filesystem.hpp>
@@ -30,7 +31,6 @@ dstree::Node::Node(dstree::Config &config,
     buffer_(buffer_manager.create_node_buffer(id)),
     nseries_(0),
     filter_(nullptr) {
-  ;
   split_ = std::make_unique<dstree::Split>();
   children_.reserve(config.node_nchild_);
 

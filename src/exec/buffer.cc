@@ -16,6 +16,9 @@ namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
 
+dstree::Buffer BUFFER_PLACEHOLDER = dstree::Buffer();
+std::reference_wrapper<dstree::Buffer> BUFFER_PLACEHOLDER_REF = std::ref(BUFFER_PLACEHOLDER);
+
 dstree::Buffer::Buffer(bool is_on_disk,
                        ID_TYPE capacity,
                        ID_TYPE series_length,

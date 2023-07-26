@@ -7,6 +7,8 @@
 
 #include <cmath>
 #include <chrono>
+#include <random>
+#include <iostream>
 
 #include <boost/filesystem.hpp>
 #include <torch/data/example.h>
@@ -64,29 +66,39 @@ dstree::Filter::Filter(dstree::Config &config,
   }
 }
 
-RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial) {
+RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_runtime_stat) {
   ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
   ID_TYPE num_valid_examples = train_size_ - num_train_examples;
   ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
 
   auto residuals = upcite::make_reserved<ERROR_TYPE>(num_conformal_examples + 2);
 
-  // residuals with two sentries, i.e., 0 and max_pred_distance
-  residuals.push_back(0);
-  residuals.push_back(*std::max_element(std::begin(pred_distances_) + num_train_examples,
-                                        std::begin(pred_distances_) + num_train_examples + num_conformal_examples));
+  if (collect_runtime_stat) {
+    std::random_device rd;
+    std::mt19937 e2(rd());
+    std::uniform_real_distribution<> dist(0, 1);
 
-  for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
-    // TODO torch::Tensor to ptr is not stable
-    if (pred_distances_[num_train_examples + i] > constant::MIN_VALUE &&
-        pred_distances_[num_train_examples + i] < constant::MAX_VALUE &&
-        !upcite::equals_zero(pred_distances_[num_train_examples + i])) {
-      // TODO not necessary for global symmetrical confidence intervals
-      residuals.emplace_back(pred_distances_[num_train_examples + i] - nn_distances_[num_train_examples + i]);
+    for (ID_TYPE i = 0; i < num_conformal_examples + 2; ++i) {
+      residuals.push_back(dist(e2));
+    }
+  } else {
+    // residuals with two sentries, i.e., 0 and max_pred_distance
+    residuals.push_back(0);
+    residuals.push_back(*std::max_element(std::begin(pred_distances_) + num_train_examples,
+                                          std::begin(pred_distances_) + num_train_examples + num_conformal_examples));
+
+    for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
+      // TODO torch::Tensor to ptr is not stable
+      if (pred_distances_[num_train_examples + i] > constant::MIN_VALUE &&
+          pred_distances_[num_train_examples + i] < constant::MAX_VALUE &&
+          !upcite::equals_zero(pred_distances_[num_train_examples + i])) {
+        // TODO not necessary for global symmetrical confidence intervals
+        residuals.emplace_back(pred_distances_[num_train_examples + i] - nn_distances_[num_train_examples + i]);
+      }
     }
   }
 
-  if (is_trial) {
+  if (is_trial && !collect_runtime_stat) {
     for (auto &residual : residuals) { residual = residual < 0 ? -residual : residual; }
     std::sort(residuals.begin(), residuals.end());
 
@@ -103,8 +115,27 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial) {
                   config_.get().filter_trial_confidence_level_);
 //#endif
 #endif
-  } else {
+  } else if (!is_trial && collect_runtime_stat) {
     conformal_predictor_->fit(residuals);
+
+    if (config_.get().filter_conformal_is_smoothen_) {
+      auto recalls = upcite::make_reserved<ERROR_TYPE>(num_conformal_examples + 2);
+
+      std::random_device rd;
+      std::mt19937 e2(rd());
+      std::uniform_real_distribution<> dist(0, 1);
+
+      for (ID_TYPE i = 0; i < num_conformal_examples + 2; ++i) {
+        recalls.push_back(dist(e2));
+      }
+
+      fit_filter_conformal_spline(recalls);
+    }
+  } else if (!is_trial && !collect_runtime_stat) {
+    conformal_predictor_->fit(residuals);
+  } else {
+    spdlog::error("trial filter {:d} model {:s} both trial and collect modes were triggered",
+                  id_, model_setting_ref_.get().model_setting_str);
   }
 
   return SUCCESS;
@@ -291,58 +322,86 @@ RESPONSE dstree::Filter::train(bool is_trial) {
     fit_conformal_predictor(is_trial);
   }
 
-  if (torch::cuda::is_available() && model_setting_ref_.get().gpu_mem_mb <= constant::EPSILON) {
-    size_t memory_size = 0;
-
-    for (const auto &parameter : model_->parameters()) {
-      memory_size += parameter.nbytes();
-    }
-
-    for (const auto &buffer : model_->buffers()) {
-      memory_size += buffer.nbytes();
-    }
-
-    model_setting_ref_.get().gpu_mem_mb = static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024);
-
-    auto trial_query = shared_train_queries_.get().index({torch::indexing::Slice(0, 1)}).clone();
-    auto trial_predictions = make_reserved<VALUE_TYPE>(config_.get().filter_trial_iterations_);
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    for (ID_TYPE trial_i = 0; trial_i < config_.get().filter_trial_iterations_; ++trial_i) {
-      VALUE_TYPE pred = model_->forward(trial_query).item<VALUE_TYPE>();
-
-      if (conformal_predictor_ != nullptr) {
-        pred = conformal_predictor_->predict(pred).left_bound_;
-      }
-
-      if (config_.get().filter_remove_square_) {
-        trial_predictions.push_back(pred * pred);
-      } else {
-        trial_predictions.push_back(pred);
-      }
-    }
-
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-
-    model_setting_ref_.get().gpu_ms_per_series =
-        duration.count() / static_cast<VALUE_TYPE>(config_.get().filter_trial_iterations_);
-
-#ifdef DEBUG
-    spdlog::info("filter trial model {:s} gpu mem = {:.3f}MB, time = {:.6f}ms",
-                 model_setting_ref_.get().model_setting_str,
-                 model_setting_ref_.get().gpu_mem_mb,
-                 model_setting_ref_.get().gpu_ms_per_series);
-#endif
-  }
-
 //  net->to(torch::Device(torch::kCPU));
   c10::cuda::CUDACachingAllocator::emptyCache();
 
   if (!is_trial) {
     is_trained_ = true;
   }
+
+  return SUCCESS;
+}
+
+RESPONSE dstree::Filter::collect_running_info(MODEL_SETTING &model_setting) {
+  model_setting_ref_ = model_setting;
+
+  // TODO instantiate the model according to the assigned model_setting_
+  model_ = std::make_shared<dstree::MLPFilter>(config_.get().series_length_,
+                                               config_.get().filter_dim_latent_,
+                                               config_.get().filter_train_dropout_p_,
+                                               config_.get().filter_leaky_relu_negative_slope_);
+
+  model_->to(*device_);
+
+  c10::InferenceMode guard;
+  model_->eval();
+
+  if (config_.get().filter_is_conformal_ && !conformal_predictor_->is_fitted()) {
+    fit_conformal_predictor(false, true);
+  }
+
+  size_t memory_size = 0;
+
+  for (const auto &parameter : model_->parameters()) {
+    memory_size += parameter.nbytes() * 2; // x2 inflates to cater the peak
+  }
+
+  for (const auto &buffer : model_->buffers()) {
+    memory_size += buffer.nbytes();
+  }
+
+  model_setting_ref_.get().gpu_mem_mb = static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024);
+
+  auto trial_query = shared_train_queries_.get().index({torch::indexing::Slice(0, 1)}).clone();
+  auto trial_predictions = make_reserved<VALUE_TYPE>(config_.get().filter_trial_iterations_);
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  for (ID_TYPE trial_i = 0; trial_i < config_.get().filter_trial_iterations_; ++trial_i) {
+    VALUE_TYPE pred = model_->forward(trial_query).item<VALUE_TYPE>();
+
+    if (conformal_predictor_ != nullptr) {
+      pred = conformal_predictor_->predict(pred).left_bound_;
+    }
+
+    if (config_.get().filter_remove_square_) {
+      trial_predictions.push_back(pred * pred);
+    } else {
+      trial_predictions.push_back(pred);
+    }
+  }
+
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+  spdlog::info("filter trial model {:s} {:d} iters = {:d}mus",
+               model_setting_ref_.get().model_setting_str,
+               config_.get().filter_trial_iterations_,
+               duration.count());
+#endif
+#endif
+
+  model_setting_ref_.get().gpu_ms_per_query =
+      static_cast<double_t>(duration.count()) / static_cast<double_t>(config_.get().filter_trial_iterations_);
+
+#ifdef DEBUG
+  spdlog::info("filter trial model {:s} gpu mem = {:.3f}MB, time = {:.6f}mus",
+               model_setting_ref_.get().model_setting_str,
+               model_setting_ref_.get().gpu_mem_mb,
+               model_setting_ref_.get().gpu_ms_per_query);
+#endif
 
   return SUCCESS;
 }

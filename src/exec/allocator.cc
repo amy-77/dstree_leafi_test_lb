@@ -288,12 +288,11 @@ RESPONSE dstree::Allocator::trial_collect_mthread() {
   return SUCCESS;
 }
 
-RESPONSE dstree::Allocator::evaluate() {
-  //
+RESPONSE dstree::Allocator::measure_cpu() {
   // test cpu_ms_per_series_
-  auto batch_nbytes =
-      static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().leaf_max_nseries_;
-  VALUE_TYPE *trial_batch = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), batch_nbytes));
+  auto batch_nbytes = static_cast<ID_TYPE>(
+      sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().leaf_max_nseries_;
+  auto trial_batch = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), batch_nbytes));
 
   auto distances = make_reserved<VALUE_TYPE>(config_.get().leaf_max_nseries_);
 
@@ -359,14 +358,70 @@ RESPONSE dstree::Allocator::evaluate() {
   }
 
 #ifdef DEBUG
-  spdlog::info("allocator trial cpu time = {:.6f}ms", cpu_ms_per_series_);
+  spdlog::info("allocator trial cpu time = {:.6f}mus", cpu_ms_per_series_);
 #endif
 
-  //
+  free(trial_batch);
+  return SUCCESS;
+}
+
+RESPONSE dstree::Allocator::measure_gpu() {
+  if (torch::cuda::is_available()) {
+    bool measure_required = false;
+    for (auto const &model_setting_ref : candidate_model_settings_) {
+      if (model_setting_ref.gpu_mem_mb <= constant::EPSILON) {
+        measure_required = true;
+      }
+    }
+
+    if (!measure_required) {
+      return SUCCESS;
+    }
+
+    std::random_device rd;
+    std::mt19937 e2(rd());
+    std::uniform_real_distribution<> dist(0, 1);
+    ID_TYPE query_nbytes = sizeof(VALUE_TYPE) * config_.get().series_length_;
+    auto random_input = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_nbytes));
+
+    for (ID_TYPE i = 0; i < config_.get().series_length_; ++i) {
+      random_input[i] = dist(e2);
+    }
+
+    auto input_tsr_ = torch::from_blob(random_input,
+                                       {1, config_.get().series_length_},
+                                       torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
+
+    std::unique_ptr<torch::Device> device = nullptr;
+    if (config_.get().filter_infer_is_gpu_) {
+      device = std::make_unique<torch::Device>(torch::kCUDA,
+                                               static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
+    } else {
+      device = std::make_unique<torch::Device>(torch::kCPU);
+    }
+    input_tsr_ = input_tsr_.to(*device);
+
+    auto trial_filter = std::make_unique<dstree::Filter>(config_, -1, input_tsr_);
+
+    for (auto &model_setting_ref : candidate_model_settings_) {
+      if (model_setting_ref.gpu_mem_mb <= constant::EPSILON) {
+        trial_filter->collect_running_info(model_setting_ref);
+      }
+    }
+
+    free(random_input);
+  }
+
+  return SUCCESS;
+}
+
+RESPONSE dstree::Allocator::evaluate() {
+  measure_cpu();
+  measure_gpu();
+
   // test candidate_model_setting_.pruning_prob
   trial_collect_mthread();
 
-  //
   // calculate gain for [node_i, model_i]
   filter_ids_.reserve(filter_infos_.size());
   gains_matrix_.reserve(filter_infos_.size() * candidate_model_settings_.size());
@@ -382,7 +437,7 @@ RESPONSE dstree::Allocator::evaluate() {
       auto &candidate_model_setting_ = candidate_model_settings_[model_i];
 
       // TODO support model in cpu
-      double_t amortized_gpu_sps = static_cast<double_t>(candidate_model_setting_.gpu_ms_per_series)
+      double_t amortized_gpu_sps = static_cast<double_t>(candidate_model_setting_.gpu_ms_per_query)
           / static_cast<double_t>(filter_info.node_.get().get_size());
 
       if (amortized_gpu_sps > cpu_ms_per_series_) {
@@ -438,7 +493,8 @@ RESPONSE dstree::Allocator::assign() {
       std::sort(filter_infos_.begin(), filter_infos_.end(), dstree::compDecreFilterScore);
 
       for (auto &filter_info : filter_infos_) {
-        if (allocated_gpu_memory_mb >= available_gpu_memory_mb_ || filter_info.score <= 0) {
+        if (allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb > available_gpu_memory_mb_
+            || filter_info.score <= 0) {
           break;
         }
 
@@ -463,15 +519,107 @@ RESPONSE dstree::Allocator::assign() {
       }
 
       for (auto &filter_info : filter_infos_) {
-        if (filter_info.node_.get().activate_filter(candidate_model_settings_[0]) == SUCCESS) {
-          allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
-          allocated_filters_count += 1;
+        if (filter_info.node_.get().get_size() > config_.get().filter_node_size_threshold_) {
+          if (filter_info.node_.get().activate_filter(candidate_model_settings_[0]) == SUCCESS) {
+            allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
+            allocated_filters_count += 1;
+          }
         }
       }
     }
   }
 
   spdlog::info("allocator assigned {:d} models of {:.3f}mb/{:.3f}mb gpu memory",
+               allocated_filters_count, allocated_gpu_memory_mb, available_gpu_memory_mb_);
+  return SUCCESS;
+}
+
+RESPONSE dstree::Allocator::reassign() {
+  if (candidate_model_settings_.size() != 1) {
+    spdlog::error("allocator reallocation only supports single candidate");
+    return FAILURE;
+  }
+
+  size_t gpu_free_bytes_, gpu_total_bytes_;
+  cuMemGetInfo(&gpu_free_bytes_, &gpu_total_bytes_);
+  VALUE_TYPE gpu_free_mb = static_cast<VALUE_TYPE>(gpu_free_bytes_) / 1024 / 1024;
+
+  if (gpu_free_mb < available_gpu_memory_mb_) {
+    spdlog::error("allocator required {:.3f}mb is not available; down to all free {:.3f}mb",
+                  available_gpu_memory_mb_, gpu_free_mb);
+    available_gpu_memory_mb_ = gpu_free_mb;
+  } else {
+    spdlog::info("allocator requested {:.3f}mb; {:.3f}mb available",
+                 available_gpu_memory_mb_, gpu_free_mb);
+  }
+
+  VALUE_TYPE allocated_gpu_memory_mb = 0;
+  ID_TYPE allocated_filters_count = 0;
+
+  if (config_.get().filter_allocate_is_gain_) {
+    measure_cpu();
+    measure_gpu();
+
+    if (candidate_model_settings_.size() == 1) {
+      for (auto &filter_info : filter_infos_) {
+        filter_info.model_setting = candidate_model_settings_[0];
+      }
+
+      auto min_nseries = static_cast<ID_TYPE>(candidate_model_settings_[0].gpu_ms_per_query / cpu_ms_per_series_);
+      spdlog::info("allocator re-assign (single), derived min_nseries = {:d}", min_nseries);
+
+      std::sort(filter_infos_.begin(), filter_infos_.end(), dstree::compDecreFilterNSeries);
+
+      for (auto &filter_info : filter_infos_) {
+        if (allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb > available_gpu_memory_mb_
+            || filter_info.node_.get().get_size() < min_nseries) {
+          break;
+        } else {
+          assert(filter_info.model_setting.get().gpu_mem_mb > 0);
+          assert(filter_info.model_setting.get().gpu_ms_per_query > 0);
+        }
+
+        if (filter_info.node_.get().activate_filter(filter_info.model_setting) == SUCCESS) {
+#ifdef DEBUG
+#ifndef DEBUGGED
+          spdlog::debug("allocator node {:d} gpu_mem_mb = {:.3f}mb",
+                        filter_info.node_.get().get_id(),
+                        filter_info.model_setting.get().gpu_mem_mb);
+#endif
+#endif
+
+          allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
+          allocated_filters_count += 1;
+        }
+      }
+    } else {
+      // TODO is reassignment possible for multi models?
+    }
+  } else {
+    // default: implant the default model to all leaf nodes
+    std::sort(filter_infos_.begin(), filter_infos_.end(), dstree::compDecreFilterNSeries);
+
+    if (config_.get().filter_model_setting_str_.empty() || candidate_model_settings_.empty()) {
+      spdlog::error("allocator default model setting does not exist (set by --filter_model_setting=)");
+      return FAILURE;
+    } else {
+      if (candidate_model_settings_.size() > 1) {
+        spdlog::warn("allocator > 1 default model settings found; use the first {:s}",
+                     candidate_model_settings_[0].model_setting_str);
+      }
+
+      for (auto &filter_info : filter_infos_) {
+        if (filter_info.node_.get().get_size() > config_.get().filter_node_size_threshold_) {
+          if (filter_info.node_.get().activate_filter(candidate_model_settings_[0]) == SUCCESS) {
+            allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
+            allocated_filters_count += 1;
+          }
+        }
+      }
+    }
+  }
+
+  spdlog::info("allocator re-assigned {:d} models of {:.1f}/{:.1f}mb gpu memory",
                allocated_filters_count, allocated_gpu_memory_mb, available_gpu_memory_mb_);
   return SUCCESS;
 }
@@ -509,12 +657,12 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
     }
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
+    //#ifndef DEBUGGED
     spdlog::debug("allocator nn_distances = {:s}",
                   upcite::array2str(nn_distances.data(), num_conformal_examples));
     spdlog::debug("allocator nn_filter_ids = {:s}",
                   upcite::array2str(nn_filter_ids.data(), num_conformal_examples));
-//#endif
+    //#endif
 #endif
 
     // two sentry points: recall at small error (recall_at_0_error, 0_error), recall at large error (0.999999, 42)

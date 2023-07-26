@@ -113,6 +113,7 @@ class Config {
   std::string filter_model_setting_str_;
   std::string filter_candidate_settings_filepath_;
   bool filter_allocate_is_gain_;
+  ID_TYPE filter_node_size_threshold_;
 
   bool filter_conformal_is_smoothen_;
   std::string filter_conformal_smoothen_method_;
@@ -122,6 +123,10 @@ class Config {
   ID_TYPE filter_trial_iterations_;
   ID_TYPE filter_trial_nnode_;
   ID_TYPE filter_trial_filter_preselection_size_threshold_;
+
+  bool filter_retrain_;
+  bool filter_reallocate_single_;
+  bool filter_reallocate_multi_;
 
   ID_TYPE allocator_cpu_trial_iterations_;
 

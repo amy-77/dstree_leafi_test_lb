@@ -34,6 +34,10 @@ class ConformalPredictor {
   RESPONSE dump(std::ofstream &node_fos) const;
   RESPONSE load(std::ifstream &node_ifs, void *ifs_buf);
 
+  bool is_fitted() const {
+    return is_fitted_;
+  }
+
  protected:
   bool is_fitted_;
   bool is_trial_;

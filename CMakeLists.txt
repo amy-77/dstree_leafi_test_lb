@@ -50,9 +50,8 @@ add_subdirectory(src/filter)
 add_subdirectory(src/navigator)
 add_subdirectory(src/exec)
 
-add_compile_options(-O0)
-#add_compile_options(-g -Werror -O3)
-#add_compile_options(-fsanitize=address -fsanitize=undefined -D_GLIBCXX_DEBUG)
+add_compile_options(-O0 -g -D_GNU_SOURCE -D_GLIBCXX_DEBUG -fsanitize=address -fsanitize=undefined)
+#add_compile_options(-O3 -Werror)
 
 target_compile_features(${TARGET} PRIVATE cxx_std_14)
 

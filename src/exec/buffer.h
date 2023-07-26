@@ -22,6 +22,7 @@ namespace dstree {
 
 class Buffer {
  public:
+  Buffer() = default;
   Buffer(bool is_on_disk,
          ID_TYPE capacity,
          ID_TYPE series_length,
@@ -60,6 +61,10 @@ class Buffer {
   std::string load_filepath_; // with node.id_
   std::string dump_filepath_;
 };
+
+
+extern Buffer BUFFER_PLACEHOLDER;
+extern std::reference_wrapper<Buffer> BUFFER_PLACEHOLDER_REF;
 
 class BufferManager {
  public:

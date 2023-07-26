@@ -53,17 +53,18 @@ class Index {
  private:
   RESPONSE insert(ID_TYPE batch_series_id);
 
-  RESPONSE train();
+  RESPONSE train(bool is_retrain = false);
 
   // initialize filter's member variables except the model
-  RESPONSE filter_initialize(dstree::Node &node,
-                             ID_TYPE *filter_id);
+  RESPONSE filter_initialize(dstree::Node &node, ID_TYPE *filter_id);
+  // to retrain
+  RESPONSE filter_deactivate(dstree::Node &node);
 
   RESPONSE filter_collect();
   RESPONSE filter_collect_mthread();
 
   // assign model settings to filters and initialize their model variable
-  RESPONSE filter_allocate(bool to_assign = true);
+  RESPONSE filter_allocate(bool to_assign = true, bool reassign = false);
 
   RESPONSE filter_train();
   RESPONSE filter_train_mthread();

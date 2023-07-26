@@ -40,8 +40,18 @@ class Filter {
 
   bool is_active() const { return is_active_; }
   RESPONSE activate(MODEL_SETTING &model_setting) {
+    if (model_setting.model_setting_str != model_setting_ref_.get().model_setting_str) {
+      is_trained_ = false;
+    }
+
     model_setting_ref_ = model_setting;
     is_active_ = true;
+
+    return SUCCESS;
+  }
+
+  RESPONSE deactivate() {
+    is_active_ = false;
 
     return SUCCESS;
   }
@@ -52,6 +62,8 @@ class Filter {
 
     return SUCCESS;
   }
+
+  RESPONSE collect_running_info(MODEL_SETTING &model_setting);
 
   RESPONSE train(bool is_trial = false);
   VALUE_TYPE infer(torch::Tensor &query_series) const;
@@ -87,7 +99,7 @@ class Filter {
   };
 
  private:
-  RESPONSE fit_conformal_predictor(bool is_trial = false);
+  RESPONSE fit_conformal_predictor(bool is_trial = false, bool collect_runtime_stat = false);
 
   std::reference_wrapper<dstree::Config> config_;
 

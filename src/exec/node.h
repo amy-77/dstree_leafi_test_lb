@@ -111,6 +111,14 @@ class Node {
     }
   }
 
+  RESPONSE deactivate_filter() {
+    if (filter_ != nullptr) {
+      return filter_->deactivate();
+    } else {
+      return FAILURE;
+    }
+  }
+
   RESPONSE push_filter_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance, VALUE_TYPE lb_distance) {
     return filter_->push_example(bsf_distance, nn_distance, lb_distance);
   }

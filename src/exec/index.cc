@@ -128,6 +128,20 @@ RESPONSE dstree::Index::filter_initialize(dstree::Node &node,
   return SUCCESS;
 }
 
+RESPONSE dstree::Index::filter_deactivate(dstree::Node &node) {
+  if (node.is_leaf()) {
+    if (node.has_active_filter()) {
+      node.deactivate_filter();
+    }
+  } else {
+    for (auto child_node : node) {
+      filter_deactivate(child_node);
+    }
+  }
+
+  return SUCCESS;
+}
+
 RESPONSE dstree::Index::filter_collect() {
   auto *m256_fetch_cache = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256),
                                                                    sizeof(VALUE_TYPE) * 8));
@@ -432,7 +446,7 @@ RESPONSE dstree::Index::filter_collect_mthread() {
   return SUCCESS;
 }
 
-RESPONSE dstree::Index::filter_allocate(bool to_assign) {
+RESPONSE dstree::Index::filter_allocate(bool to_assign, bool reassign) {
   std::stack<std::reference_wrapper<dstree::Node>> node_cache;
   node_cache.push(std::ref(*root_));
 
@@ -454,6 +468,8 @@ RESPONSE dstree::Index::filter_allocate(bool to_assign) {
 
   if (to_assign) {
     return allocator_->assign();
+  } else if (reassign) {
+    return allocator_->reassign();
   } else {
     return SUCCESS;
   }
@@ -578,15 +594,15 @@ RESPONSE dstree::Index::filter_train_mthread() {
   return SUCCESS;
 }
 
-RESPONSE dstree::Index::train() {
-  //
+RESPONSE dstree::Index::train(bool is_retrain) {
   // fetch or generate training queries
-  //
   auto query_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
       * config_.get().series_length_ * config_.get().filter_train_nexample_;
   filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_nbytes));
 
   if (!fs::exists(config_.get().filter_query_filepath_)) {
+    assert(!is_retrain);
+
     if (config_.get().filter_query_filepath_ != "") {
       spdlog::error("filter train query filepath {:s} does not exist", config_.get().filter_query_filepath_);
     }
@@ -691,24 +707,26 @@ RESPONSE dstree::Index::train() {
   filter_train_query_tsr_ = filter_train_query_tsr_.to(*device_);
 
   if (config_.get().require_neurofilter_) {
-    //
-    // initialize filters
-    ID_TYPE filter_id = 0;
-    filter_initialize(*root_, &filter_id);
-
-    spdlog::info("initialized {:d} filters", filter_id);
+    if (is_retrain) {
+      filter_deactivate(*root_);
+    } else {
+      // initialize filters
+      ID_TYPE filter_id = 0;
+      filter_initialize(*root_, &filter_id);
+      spdlog::info("initialized {:d} filters", filter_id);
+    }
   }
 
-  //
-  // collect filter training data, i.e., the bsf distances, nn distances, low-bound distances
-  if (config_.get().filter_train_is_mthread_) {
-    filter_collect_mthread();
-  } else {
-    filter_collect();
+  if (!is_retrain) {
+    // collect filter training data, i.e., the bsf distances, nn distances, low-bound distances
+    if (config_.get().filter_train_is_mthread_) {
+      filter_collect_mthread();
+    } else {
+      filter_collect();
+    }
   }
 
   if (config_.get().require_neurofilter_) {
-    //
     // allocate filters among nodes (and activate them)
     filter_allocate(true);
 
@@ -825,8 +843,17 @@ RESPONSE dstree::Index::load() {
     if (!config_.get().to_load_filters_) {
       train();
     } else {
-      // initialize allocator for setting conformal intervals
-      filter_allocate(false);
+      if (config_.get().filter_retrain_) {
+        train(true);
+      } else if (config_.get().filter_reallocate_multi_) {
+        // TODO
+        filter_allocate(false, true);
+      } else if (config_.get().filter_reallocate_single_) {
+        filter_allocate(false, true);
+      } else {
+        // initialize allocator for setting conformal intervals
+        filter_allocate(false);
+      }
 
       // support difference devices for training and inference
       if (config_.get().filter_infer_is_gpu_) {

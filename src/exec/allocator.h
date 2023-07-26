@@ -56,12 +56,16 @@ class Allocator {
   RESPONSE push_instance(const FilterInfo &filter_info);
 
   RESPONSE assign();
+  RESPONSE reassign();
 
   RESPONSE set_confidence_from_recall();
 
  private:
   RESPONSE trial_collect_mthread();
   RESPONSE evaluate();
+
+  RESPONSE measure_cpu();
+  RESPONSE measure_gpu();
 
   std::reference_wrapper<Config> config_;
 

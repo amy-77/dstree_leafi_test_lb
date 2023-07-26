@@ -75,10 +75,23 @@ upcite::INTERVAL upcite::ConformalRegressor::predict(VALUE_TYPE y_hat,
                                                      VALUE_TYPE confidence_level,
                                                      VALUE_TYPE y_max,
                                                      VALUE_TYPE y_min) {
+#ifdef DEBUG
+#ifndef DEBUGGED
+  spdlog::debug("conformal is_fitted {:b} conf_level {:.3f} alpha {:.3f}",
+                is_fitted_,
+                confidence_level_,
+                alpha_);
+#endif
+#endif
+
   if (is_fitted_) {
-    if (confidence_level >= 0 && !upcite::is_equal(confidence_level_, confidence_level)) {
+    // confidence_level_ > 1 denotes it is set externally
+    if (confidence_level_ <= 1 && !upcite::is_equal(confidence_level_, confidence_level)) {
+      assert(confidence_level >= 0 && confidence_level <= 1);
+
       abs_error_i_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence_level);
       alpha_ = alphas_[abs_error_i_];
+
       confidence_level_ = confidence_level;
     }
 
@@ -162,7 +175,10 @@ VALUE_TYPE upcite::ConformalPredictor::get_alpha_by_pos(ID_TYPE pos) const {
 RESPONSE upcite::ConformalPredictor::set_alpha_by_pos(ID_TYPE pos) {
   if (pos >= 0 && pos < alphas_.size()) {
     alpha_ = alphas_[pos];
-    confidence_level_ = -1;
+
+    // TODO design a better workflow for is_fitted_
+    is_fitted_ = true;
+    confidence_level_ = EXT_DISCRETE;
 
     return SUCCESS;
   }
@@ -172,9 +188,11 @@ RESPONSE upcite::ConformalPredictor::set_alpha_by_pos(ID_TYPE pos) {
 
 RESPONSE upcite::ConformalRegressor::set_alpha_by_recall(VALUE_TYPE recall) {
   assert(gsl_accel_ != nullptr && gsl_spline_ != nullptr);
-
   alpha_ = gsl_spline_eval(gsl_spline_.get(), recall, gsl_accel_.get());
-  confidence_level_ = -1;
+
+  // TODO design a better workflow for is_fitted_
+  is_fitted_ = true;
+  confidence_level_ = EXT_SPLINE;
 
   return SUCCESS;
 }

@@ -44,7 +44,8 @@ dstree::Filter::Filter(dstree::Config &config,
 
   if (config.filter_train_is_gpu_) {
     // TODO support multiple devices
-    device_ = std::make_unique<torch::Device>(torch::kCUDA, static_cast<c10::DeviceIndex>(config.filter_device_id_));
+    device_ = std::make_unique<torch::Device>(torch::kCUDA,
+                                              static_cast<c10::DeviceIndex>(config.filter_device_id_));
   } else {
     device_ = std::make_unique<torch::Device>(torch::kCPU);
   }

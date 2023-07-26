@@ -998,16 +998,6 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
       std::tie(node_to_visit, node2visit_lbdistance) = leaf_min_heap_.top();
       leaf_min_heap_.pop();
 
-//#ifdef DEBUG
-////#ifndef DEBUGGED
-//      spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f}",
-//                    answers.get()->query_id_,
-//                    node_to_visit.get().get_id(),
-//                    node2visit_lbdistance,
-//                    answers->get_bsf());
-////#endif
-//#endif
-
       if (node_to_visit.get().is_leaf()) {
         if (visited_node_counter < config_.get().search_max_nnode_ &&
             visited_series_counter < config_.get().search_max_nseries_) {
@@ -1015,6 +1005,17 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
             if (config_.get().examine_ground_truth_ || answers->is_bsf(node2visit_lbdistance)) {
               if (node_to_visit.get().has_active_filter()) {
                 VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
+
+#ifdef DEBUG
+//#ifndef DEBUGGED
+      spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f} pred {:.3f}",
+                    answers.get()->query_id_,
+                    node_to_visit.get().get_id(),
+                    node2visit_lbdistance,
+                    answers->get_bsf(),
+                    predicted_nn_distance);
+//#endif
+#endif
 
                 if (predicted_nn_distance > answers->get_bsf()) {
                   nfpruned_node_counter += 1;

@@ -714,7 +714,12 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
   if (config_.get().filter_conformal_is_smoothen_) {
     for (auto &filter_info : filter_infos_) {
       if (filter_info.node_.get().has_active_filter()) {
-        filter_info.node_.get().set_filter_abs_error_interval_by_recall(config_.get().filter_conformal_recall_);
+        if (filter_info.node_.get().set_filter_abs_error_interval_by_recall(config_.get().filter_conformal_recall_)
+            == FAILURE) {
+          spdlog::error("allocator failed to get node {:d} conformed at recall {:.3f}",
+                        filter_info.node_.get().get_id(),
+                        config_.get().filter_conformal_recall_);
+        }
 
         spdlog::info("allocator node {:d} abs_error {:.3f} at {:.4f}",
                      filter_info.node_.get().get_id(),
@@ -740,7 +745,12 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
 
     for (auto &filter_info : filter_infos_) {
       if (filter_info.node_.get().has_active_filter()) {
-        filter_info.node_.get().set_filter_abs_error_interval_by_pos(last_recall_i);
+        if (filter_info.node_.get().set_filter_abs_error_interval_by_pos(last_recall_i) == FAILURE) {
+          spdlog::error("allocator failed to get node {:d} conformed with abs {:.3f} at pos {:d}",
+                        filter_info.node_.get().get_id(),
+                        filter_info.node_.get().get_filter_abs_error_interval_by_pos(last_recall_i),
+                        last_recall_i);
+        }
       }
     }
   }

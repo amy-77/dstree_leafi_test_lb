@@ -20,6 +20,11 @@ enum CONFORMAL_CORE {
   SPLINE = 1 // smoothened
 };
 
+enum CONFIDENCE_LEVEL_EXTERNAL {
+  EXT_DISCRETE = 2,
+  EXT_SPLINE = 3
+};
+
 class ConformalPredictor {
  public:
   ConformalPredictor() : is_fitted_(false), is_trial_(false) {};

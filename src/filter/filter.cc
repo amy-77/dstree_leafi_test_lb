@@ -408,6 +408,27 @@ RESPONSE dstree::Filter::collect_running_info(MODEL_SETTING &model_setting) {
 }
 
 VALUE_TYPE dstree::Filter::infer(torch::Tensor &query_series) const {
+#ifdef DEBUG
+#ifndef DEBUGGED
+  spdlog::debug("filter {:d} {:b} device {:s}, requested {:b}:{:d}",
+                id_, is_trained_,
+                device_->str(),
+                config_.get().filter_infer_is_gpu_, config_.get().filter_device_id_);
+  spdlog::debug("filter {:d} {:b} query device {:s}, requested {:b}:{:d}",
+                id_, is_trained_,
+                query_series.device().str(),
+                config_.get().filter_infer_is_gpu_, config_.get().filter_device_id_);
+
+  auto paras = model_->parameters();
+  for (ID_TYPE i = 0; i < paras.size(); ++i) {
+    spdlog::debug("filter {:d} {:b} model_p_{:d} device {:s}, requested {:b}:{:d}",
+                  id_, is_trained_,
+                  i, paras[i].device().str(),
+                  config_.get().filter_infer_is_gpu_, config_.get().filter_device_id_);
+  }
+#endif
+#endif
+
   if (is_trained_) {
     c10::InferenceMode guard;
 
@@ -597,14 +618,21 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
       return FAILURE;
     }
 
+    if (config_.get().filter_infer_is_gpu_) {
+      // TODO support multiple devices
+      device_ = std::make_unique<torch::Device>(torch::kCUDA,
+                                                static_cast<c10::DeviceIndex>(config_.get().filter_device_id_));
+    } else {
+      device_ = std::make_unique<torch::Device>(torch::kCPU);
+    }
+
     // TODO instantiate the model according to the setting
     model_ = std::make_unique<dstree::MLPFilter>(config_.get().series_length_,
                                                  config_.get().filter_dim_latent_,
                                                  config_.get().filter_train_dropout_p_,
                                                  config_.get().filter_leaky_relu_negative_slope_);
-    model_->to(*device_);
-
     torch::load(model_, model_filepath);
+    model_->to(*device_);
 
     model_->eval();
 //  net->to(torch::Device(torch::kCPU));

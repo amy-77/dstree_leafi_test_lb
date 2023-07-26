@@ -1007,14 +1007,14 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
                 VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
 
 #ifdef DEBUG
-//#ifndef DEBUGGED
-      spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f} pred {:.3f}",
-                    answers.get()->query_id_,
-                    node_to_visit.get().get_id(),
-                    node2visit_lbdistance,
-                    answers->get_bsf(),
-                    predicted_nn_distance);
-//#endif
+#ifndef DEBUGGED
+                spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f} pred {:.3f}",
+                              answers.get()->query_id_,
+                              node_to_visit.get().get_id(),
+                              node2visit_lbdistance,
+                              answers->get_bsf(),
+                              predicted_nn_distance);
+#endif
 #endif
 
                 if (predicted_nn_distance > answers->get_bsf()) {

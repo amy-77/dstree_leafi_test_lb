@@ -25,7 +25,6 @@ list(APPEND CMAKE_MODULE_PATH "$ENV{LIBTORCH_ROOT}/share/cmake/Torch")
 list(APPEND CMAKE_PREFIX_PATH "$ENV{LIBTORCH_ROOT}/share/cmake/Torch")
 
 find_package(Torch REQUIRED)
-
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
 include_directories(
@@ -50,8 +49,9 @@ add_subdirectory(src/filter)
 add_subdirectory(src/navigator)
 add_subdirectory(src/exec)
 
-add_compile_options(-O0 -g -D_GNU_SOURCE -D_GLIBCXX_DEBUG -fsanitize=address -fsanitize=undefined)
 #add_compile_options(-O3 -Werror)
+#add_compile_options(-O0 -g -D_GNU_SOURCE -D_GLIBCXX_DEBUG -lasan -fsanitize=address -fsanitize=undefined)
+add_compile_options(-O0 -g -D_GNU_SOURCE -D_GLIBCXX_DEBUG)
 
 target_compile_features(${TARGET} PRIVATE cxx_std_14)
 
@@ -61,4 +61,4 @@ target_link_libraries(${TARGET}
 
 install(TARGETS ${TARGET} DESTINATION ${PROJECT_SOURCE_DIR}/bin)
 
-#add_subdirectory(test)
+add_subdirectory(test)

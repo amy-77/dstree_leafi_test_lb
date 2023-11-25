@@ -59,6 +59,9 @@ class Allocator {
   RESPONSE reassign();
 
   RESPONSE set_confidence_from_recall();
+  ID_TYPE get_node_size_threshold() {
+    return node_size_threshold_;
+  }
 
  private:
   RESPONSE trial_collect_mthread();
@@ -70,6 +73,7 @@ class Allocator {
   std::reference_wrapper<Config> config_;
 
   double_t cpu_ms_per_series_;
+  ID_TYPE node_size_threshold_;
 
   std::vector<MODEL_SETTING> candidate_model_settings_;
   VALUE_TYPE available_gpu_memory_mb_;

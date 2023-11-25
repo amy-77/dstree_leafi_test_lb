@@ -11,5 +11,5 @@ target_compile_features(${TARGET} PRIVATE cxx_std_14)
 target_compile_options(${TARGET} PUBLIC -march=native -msse3 -msse4.2 -mavx -mavx2)
 
 target_link_libraries(${TARGET}
-        PRIVATE navigator filter model util common ${Boost_LIBRARIES} ${TORCH_LIBRARIES} pthread
+        PRIVATE navigator filter model util common ${Boost_LIBRARIES} GSL::gsl GSL::gslcblas ${TORCH_LIBRARIES} pthread
         )

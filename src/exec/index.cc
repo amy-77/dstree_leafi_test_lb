@@ -595,79 +595,37 @@ RESPONSE dstree::Index::filter_train_mthread() {
 }
 
 RESPONSE dstree::Index::train(bool is_retrain) {
-  // fetch or generate training queries
-  auto query_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
-      * config_.get().series_length_ * config_.get().filter_train_nexample_;
-  filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_nbytes));
-
   if (!fs::exists(config_.get().filter_query_filepath_)) {
-    assert(!is_retrain);
+    assert(!is_retrain); // not applicable to loaded filters
 
-    if (config_.get().filter_query_filepath_ != "") {
+    if (!config_.get().filter_query_filepath_.empty()) {
       spdlog::error("filter train query filepath {:s} does not exist", config_.get().filter_query_filepath_);
+      return FAILURE;
     }
 
-    auto sampled_ids = static_cast<ID_TYPE *>(malloc(sizeof(ID_TYPE) * config_.get().db_nseries_));
-    for (ID_TYPE i = 0; i < config_.get().db_nseries_; ++i) {
-      sampled_ids[i] = i;
-    }
+    ID_TYPE num_synthetic_queries = root_->get_num_synthetic_queries(allocator_->get_node_size_threshold());
 
-    std::random_device rd;
-    std::mt19937 rng{rd()};
-    std::uniform_int_distribution<ID_TYPE> rand_uniform(0, constant::MAX_ID);
-    std::shuffle(sampled_ids, sampled_ids + config_.get().db_nseries_, rng);
+    ID_TYPE query_set_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
+        * config_.get().series_length_ * num_synthetic_queries;
+    filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_set_nbytes));
 
-    std::string filter_query_id_filepath =
-        config_.get().index_dump_folderpath_ + config_.get().filter_query_id_filename_;
-    std::ofstream id_fout(filter_query_id_filepath, std::ios::binary | std::ios_base::app);
-    id_fout.write(reinterpret_cast<char *>(sampled_ids), sizeof(ID_TYPE) * config_.get().filter_train_nexample_);
-    id_fout.close();
+    ID_TYPE num_generated_queries = 0;
+    root_->synthesize_query(filter_train_query_ptr_, num_generated_queries, allocator_->get_node_size_threshold());
+    assert(num_generated_queries == num_synthetic_queries);
 
-    std::ifstream db_fin(config_.get().db_filepath_, std::ios::in | std::ios::binary);
-    ID_TYPE series_nbytes = sizeof(VALUE_TYPE) * config_.get().series_length_;
-
-    for (ID_TYPE i = 0; i < config_.get().filter_train_nexample_; ++i) {
-      VALUE_TYPE *series_ptr = filter_train_query_ptr_ + config_.get().series_length_ * i;
-
-      ID_TYPE series_bytes_offset = series_nbytes * sampled_ids[i];
-      db_fin.seekg(series_bytes_offset);
-      db_fin.read(reinterpret_cast<char *>(series_ptr), series_nbytes);
-
-      VALUE_TYPE mean = 0, std_dev = 0;
-      for (ID_TYPE j = 0; j < config_.get().series_length_; ++j) {
-        VALUE_TYPE f1 = static_cast<VALUE_TYPE>(rand_uniform(rng) % 999 + 1) / 1000.0f;
-        VALUE_TYPE c = static_cast<VALUE_TYPE>(sqrt(-2.0 * log(f1)));
-
-        VALUE_TYPE f2 = static_cast<VALUE_TYPE>(rand_uniform(rng) % 1000) / 1000.0f;
-        VALUE_TYPE b = 2 * constant::PI_APPROX_7 * f2;
-
-        VALUE_TYPE noise = c * cos(b) * sqrt(config_.get().filter_query_noise_level_);
-
-        series_ptr[j] += noise;
-        mean += series_ptr[j];
-      }
-
-      mean /= config_.get().series_length_;
-
-      for (ID_TYPE j = 0; j < config_.get().series_length_; ++j) {
-        std_dev += (series_ptr[j] - mean) * (series_ptr[j] - mean);
-      }
-
-      std_dev = sqrt(std_dev / config_.get().series_length_);
-
-      for (ID_TYPE j = 0; j < config_.get().series_length_; ++j) {
-        series_ptr[j] = (series_ptr[j] - mean) / std_dev;
-      }
-    }
+    config_.get().filter_train_nexample_ = num_synthetic_queries;
 
     std::string filter_query_filepath = config_.get().index_dump_folderpath_ + config_.get().filter_query_filename_;
     std::ofstream query_fout(filter_query_filepath, std::ios::binary | std::ios_base::app);
-    query_fout.write(reinterpret_cast<char *>(filter_train_query_ptr_),
-                     series_nbytes * config_.get().filter_train_nexample_);
+    query_fout.write(reinterpret_cast<char *>(filter_train_query_ptr_), query_set_nbytes);
     query_fout.close();
 
-    spdlog::info("generated {:d} filter train queries", config_.get().filter_train_nexample_);
+    spdlog::info("filter train generated {:d} filter train queries", config_.get().filter_train_nexample_);
   } else {
+    auto query_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
+        * config_.get().series_length_ * config_.get().filter_train_nexample_;
+    filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_nbytes));
+
     std::ifstream query_fin(config_.get().filter_query_filepath_, std::ios::in | std::ios::binary);
     if (!query_fin.good()) {
       spdlog::error("filter train query filepath {:s} cannot open", config_.get().filter_query_filepath_);

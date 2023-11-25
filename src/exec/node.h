@@ -155,6 +155,9 @@ class Node {
                 ID_TYPE &nnode,
                 ID_TYPE &nleaf);
 
+  ID_TYPE get_num_synthetic_queries(ID_TYPE node_size_threshold);
+  RESPONSE synthesize_query(VALUE_TYPE *generated_queries, ID_TYPE &num_generated_queries, ID_TYPE node_size_threshold);
+
  private:
   ID_TYPE depth_, id_;
   ID_TYPE nseries_;

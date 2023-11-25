@@ -71,6 +71,9 @@ class Config {
   VALUE_TYPE filter_train_clip_grad_norm_type_;
   VALUE_TYPE filter_train_clip_grad_max_norm_;
 
+  ID_TYPE filter_num_synthetic_query_per_filter_;
+  VALUE_TYPE filter_noise_level_;
+
   std::string filter_query_filepath_;
 
   bool filter_train_is_mthread_;

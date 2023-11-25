@@ -17,12 +17,13 @@
 #include "distance.h"
 
 namespace dstree = upcite::dstree;
+namespace constant = upcite::constant;
 
 dstree::Allocator::Allocator(dstree::Config &config,
                              ID_TYPE nfilters) :
     config_(config),
-    is_recall_calculated_(false) {
-  cpu_ms_per_series_ = -1;
+    is_recall_calculated_(false),
+    node_size_threshold_(0) {
 
   available_gpu_memory_mb_ = config.filter_max_gpu_memory_mb_;
 
@@ -32,6 +33,21 @@ dstree::Allocator::Allocator(dstree::Config &config,
   if (nfilters > 0) {
     filter_infos_.reserve(nfilters);
   }
+
+  measure_cpu();
+  measure_gpu();
+
+  node_size_threshold_ = constant::MAX_ID;
+  for (ID_TYPE candidate_model_i = 0; candidate_model_i < candidate_model_settings_.size(); ++candidate_model_i) {
+    ID_TYPE current_node_size_threshold = candidate_model_settings_[candidate_model_i].gpu_ms_per_query / cpu_ms_per_series_;
+    if (current_node_size_threshold < node_size_threshold_) {
+      node_size_threshold_ = current_node_size_threshold;
+    }
+  }
+
+#ifdef DEBUG
+  spdlog::info("allocator node size threshold = {:d}", node_size_threshold_);
+#endif
 }
 
 RESPONSE dstree::Allocator::push_instance(const dstree::FilterInfo &filter_info) {
@@ -416,9 +432,6 @@ RESPONSE dstree::Allocator::measure_gpu() {
 }
 
 RESPONSE dstree::Allocator::evaluate() {
-  measure_cpu();
-  measure_gpu();
-
   // test candidate_model_setting_.pruning_prob
   trial_collect_mthread();
 
@@ -557,9 +570,6 @@ RESPONSE dstree::Allocator::reassign() {
   ID_TYPE allocated_filters_count = 0;
 
   if (config_.get().filter_allocate_is_gain_) {
-    measure_cpu();
-    measure_gpu();
-
     if (candidate_model_settings_.size() == 1) {
       for (auto &filter_info : filter_infos_) {
         filter_info.model_setting = candidate_model_settings_[0];

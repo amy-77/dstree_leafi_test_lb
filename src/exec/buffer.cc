@@ -86,6 +86,49 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
   return nullptr;
 }
 
+
+const VALUE_TYPE *dstree::Buffer::get_series_ptr_by_id(ID_TYPE node_series_id) {
+  if (is_on_disk_) {
+    if (local_buffer_ == nullptr) {
+      ID_TYPE local_buffer_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * series_length_ * size_;
+      local_buffer_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), local_buffer_nbytes));
+
+      if (!fs::exists(load_filepath_)) {
+        spdlog::error("node file {:s} does not exist", load_filepath_);
+
+        return nullptr;
+      }
+
+      std::ifstream fin(load_filepath_, std::ios::in | std::ios::binary);
+      if (!fin.good()) {
+        spdlog::error("node file {:s} cannot open", load_filepath_);
+
+        return nullptr;
+      }
+
+      fin.read(reinterpret_cast<char *>(local_buffer_), local_buffer_nbytes);
+
+      if (fin.fail()) {
+        spdlog::error("node buffer cannot read {:d} bytes from {:s}", local_buffer_nbytes, load_filepath_);
+
+        return nullptr;
+      }
+
+      fin.close();
+    }
+
+    if (node_series_id < size_) {
+      return local_buffer_ + series_length_ * node_series_id;
+    }
+  } else {
+    if (node_series_id < size_) {
+      return global_buffer_ + series_length_ * offsets_[node_series_id];
+    }
+  }
+
+  return nullptr;
+}
+
 RESPONSE dstree::Buffer::reset() {
   if (local_buffer_ != nullptr) {
     std::free(local_buffer_);

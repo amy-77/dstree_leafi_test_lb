@@ -40,6 +40,7 @@ class Buffer {
   ID_TYPE get_offset(ID_TYPE node_series_id) const { return offsets_[node_series_id]; }
 
   const VALUE_TYPE *get_next_series_ptr();
+  const VALUE_TYPE *get_series_ptr_by_id(ID_TYPE node_series_id);
   RESPONSE reset();
 
   bool is_full() const { return capacity_ > 0 && offsets_.size() == capacity_; }

@@ -12,6 +12,8 @@
 
 #include <spdlog/spdlog.h>
 #include <boost/filesystem.hpp>
+#include <gsl/gsl_rng.h>
+#include <gsl/gsl_randist.h>
 
 #include "stat.h"
 #include "distance.h"
@@ -206,7 +208,7 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
       current_split->split_subsegment_id_ = subsegment_id;
 
       mean_width = eapca_envelope_->subsegment_max_means_[subsegment_id]
-              - eapca_envelope_->subsegment_min_means_[subsegment_id];
+          - eapca_envelope_->subsegment_min_means_[subsegment_id];
       max_std = eapca_envelope_->subsegment_max_stds_[subsegment_id];
       subsegment_length = static_cast<VALUE_TYPE>(eapca_envelope_->subsegment_lengths_[subsegment_id]);
 
@@ -625,5 +627,68 @@ RESPONSE dstree::Node::load(void *ifs_buf,
   }
 
   nnode += 1;
+  return SUCCESS;
+}
+
+ID_TYPE dstree::Node::get_num_synthetic_queries(ID_TYPE node_size_threshold) {
+  ID_TYPE num_synthetic_queries = 0;
+
+  if (is_leaf()) {
+    if (nseries_ > node_size_threshold) {
+      num_synthetic_queries = config_.get().filter_num_synthetic_query_per_filter_;
+    }
+  } else {
+    for (auto &child : children_) {
+      num_synthetic_queries += child->get_num_synthetic_queries(node_size_threshold);
+    }
+  }
+
+  return num_synthetic_queries;
+}
+
+RESPONSE dstree::Node::synthesize_query(VALUE_TYPE *generated_queries,
+                                        ID_TYPE &num_generated_queries,
+                                        ID_TYPE node_size_threshold) {
+  if (is_leaf()) {
+    if (get_size() > node_size_threshold) {
+      // TODO support multiple samples
+      assert(config_.get().filter_num_synthetic_query_per_filter_ == 1);
+
+      // provided by ChatGPT
+      const gsl_rng_type *T;
+      gsl_rng *r;
+      gsl_rng_env_setup(); // Create a generator chosen by the environment variable GSL_RNG_TYPE
+      T = gsl_rng_default;
+      r = gsl_rng_alloc(T);
+
+      // TODO support multiple samples
+      bool is_succeeded = false;
+      while (!is_succeeded) {
+        ID_TYPE sample_series_id = upcite::get_random_int_in_range(0, nseries_);
+        const VALUE_TYPE *sample_series = buffer_.get().get_series_ptr_by_id(sample_series_id);
+        assert(sample_series != nullptr);
+
+        VALUE_TYPE *generated_series = generated_queries + config_.get().series_length_ * num_generated_queries;
+        memcpy(generated_series, sample_series, sizeof(VALUE_TYPE) * config_.get().series_length_);
+
+        for (ID_TYPE value_i = 0; value_i < config_.get().series_length_; ++value_i) {
+          generated_series[value_i] += (VALUE_TYPE ) gsl_ran_gaussian(r, config_.get().filter_noise_level_);
+        }
+
+        RESPONSE return_code = upcite::znormalize(generated_series, config_.get().series_length_);
+        if (return_code == SUCCESS) {
+          num_generated_queries += 1;
+          is_succeeded = true;
+        } else {
+          spdlog::error("filter generate broken synthetic series; regenerate");
+        }
+      }
+    }
+  } else {
+    for (auto &child : children_) {
+      child->synthesize_query(generated_queries, num_generated_queries, node_size_threshold);
+    }
+  }
+
   return SUCCESS;
 }

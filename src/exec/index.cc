@@ -19,6 +19,7 @@
 #include "vec.h"
 #include "eapca.h"
 #include "answer.h"
+#include "query_synthesizer.h"
 
 namespace fs = boost::filesystem;
 
@@ -143,8 +144,7 @@ RESPONSE dstree::Index::filter_deactivate(dstree::Node &node) {
 }
 
 RESPONSE dstree::Index::filter_collect() {
-  auto *m256_fetch_cache = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256),
-                                                                   sizeof(VALUE_TYPE) * 8));
+  auto *m256_fetch_cache = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), sizeof(VALUE_TYPE) * 8));
 
   for (ID_TYPE query_id = 0; query_id < config_.get().filter_train_nexample_; ++query_id) {
     const VALUE_TYPE *series_ptr = filter_train_query_ptr_ + config_.get().series_length_ * query_id;
@@ -158,7 +158,7 @@ RESPONSE dstree::Index::filter_collect() {
     }
 
     VALUE_TYPE local_nn_distance = resident_node.get().search(series_ptr, m256_fetch_cache);
-    resident_node.get().push_filter_example(answer->get_bsf(), local_nn_distance, 0);
+    resident_node.get().push_global_example(answer->get_bsf(), local_nn_distance, 0);
 
     visited_node_counter += 1;
     visited_series_counter += resident_node.get().get_size();
@@ -186,7 +186,7 @@ RESPONSE dstree::Index::filter_collect() {
       if (node_to_visit.get().is_leaf()) {
         if (node_to_visit.get().get_id() != resident_node.get().get_id()) {
           local_nn_distance = node_to_visit.get().search(series_ptr, m256_fetch_cache);
-          node_to_visit.get().push_filter_example(answer->get_bsf(), local_nn_distance,
+          node_to_visit.get().push_global_example(answer->get_bsf(), local_nn_distance,
                                                   node2visit_lbdistance);
 
           visited_node_counter += 1;
@@ -298,7 +298,7 @@ void search_thread_F(const SearchCache &search_cache) {
       VALUE_TYPE local_nn_distance = node_to_visit.get().search_mt(
           search_cache.query_series_ptr_, *search_cache.answer_, search_cache.answer_mutex_);
 
-      node_to_visit.get().push_filter_example(global_bsf, local_nn_distance, node2visit_lbdistance);
+      node_to_visit.get().push_global_example(global_bsf, local_nn_distance, node2visit_lbdistance);
 
       pthread_mutex_lock(search_cache.log_mutex_);
       *search_cache.visited_node_counter_ += 1;
@@ -378,7 +378,7 @@ RESPONSE dstree::Index::filter_collect_mthread() {
                                                                  std::ref(*answer.get()),
                                                                  answer_mutex.get());
     if (config_.get().require_neurofilter_) {
-      resident_node.get().push_filter_example(global_bsf_distance, local_nn_distance, 0);
+      resident_node.get().push_global_example(global_bsf_distance, local_nn_distance, 0);
     }
 
     visited_node_counter += 1;
@@ -458,7 +458,7 @@ RESPONSE dstree::Index::filter_allocate(bool to_assign, bool reassign) {
       FilterInfo filter_info(node_to_visit);
       filter_info.external_pruning_probability_ = node_to_visit.get().get_envelop_pruning_frequency();
 
-      allocator_->push_instance(filter_info);
+      allocator_->push_filter_info(filter_info);
     } else {
       for (auto child_node : node_to_visit.get()) {
         node_cache.push(child_node);
@@ -603,17 +603,61 @@ RESPONSE dstree::Index::train(bool is_retrain) {
       return FAILURE;
     }
 
-    ID_TYPE num_synthetic_queries = root_->get_num_synthetic_queries(allocator_->get_node_size_threshold());
+    ID_TYPE query_set_nbytes = -1;
+    if (config_.get().filter_num_synthetic_query_per_filter_ > 0) {
+      ID_TYPE num_synthetic_queries = root_->get_num_synthetic_queries(allocator_->get_node_size_threshold());
 
-    ID_TYPE query_set_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
-        * config_.get().series_length_ * num_synthetic_queries;
-    filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_set_nbytes));
+      query_set_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
+          * config_.get().series_length_ * num_synthetic_queries;
+      filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_set_nbytes));
 
-    ID_TYPE num_generated_queries = 0;
-    root_->synthesize_query(filter_train_query_ptr_, num_generated_queries, allocator_->get_node_size_threshold());
-    assert(num_generated_queries == num_synthetic_queries);
+      ID_TYPE num_generated_queries = 0;
+      root_->synthesize_query(filter_train_query_ptr_, num_generated_queries, allocator_->get_node_size_threshold());
+      assert(num_generated_queries == num_synthetic_queries);
 
-    config_.get().filter_train_nexample_ = num_synthetic_queries;
+      config_.get().filter_train_nexample_ = num_synthetic_queries;
+    } else if (config_.get().filter_train_num_global_example_ > 0
+        && config_.get().filter_train_num_local_example_ > 0) {
+      // generate global queries
+      query_set_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
+          * config_.get().series_length_ * config_.get().filter_train_num_global_example_;
+      filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_set_nbytes));
+
+      dstree::Synthesizer query_synthesizer(config_, nleaf_);
+
+      ID_TYPE leaf_size_threshold = config_.get().filter_default_node_size_threshold_;
+
+      std::stack<std::reference_wrapper<dstree::Node>> node_cache;
+      node_cache.push(std::ref(*root_));
+      while (!node_cache.empty()) {
+        std::reference_wrapper<dstree::Node> node_to_visit = node_cache.top();
+        node_cache.pop();
+
+        if (node_to_visit.get().is_leaf()) {
+          if (node_to_visit.get().get_size() >= leaf_size_threshold) {
+            query_synthesizer.push_node(node_to_visit);
+          }
+        } else {
+          for (auto child_node : node_to_visit.get()) {
+            node_cache.push(child_node);
+          }
+        }
+      }
+
+      RESPONSE return_code = query_synthesizer.generate_global_data(filter_train_query_ptr_);
+      config_.get().filter_train_nexample_ = config_.get().filter_train_num_global_example_;
+
+      // generate and *search* local queries
+      return_code = static_cast<RESPONSE>(return_code | query_synthesizer.generate_local_data());
+      if (return_code == FAILURE) {
+        spdlog::error("failed to generate global and local queries");
+        return FAILURE;
+      }
+    } else {
+      spdlog::error("erroneous config for query generation");
+      return FAILURE;
+    }
+    assert(query_set_nbytes > 0);
 
     std::string filter_query_filepath = config_.get().index_dump_folderpath_ + config_.get().filter_query_filename_;
     std::ofstream query_fout(filter_query_filepath, std::ios::binary | std::ios_base::app);

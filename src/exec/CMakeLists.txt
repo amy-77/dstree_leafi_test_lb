@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(TARGET exec)
-add_library(${TARGET} SHARED index.cc allocator.cc node.cc buffer.cc eapca.cc split.cc answer.cc)
+add_library(${TARGET} SHARED query_synthesizer.cc index.cc filter_allocator.cc node.cc buffer.cc eapca.cc split.cc answer.cc)
 
 set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_features(${TARGET} PRIVATE cxx_std_14)

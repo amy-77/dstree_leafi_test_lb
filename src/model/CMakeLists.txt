@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(TARGET model)
-add_library(${TARGET} SHARED scheduler.cc dataset.h)
+add_library(${TARGET} SHARED models.cc scheduler.cc dataset.h)
 
 set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_features(${TARGET} PRIVATE cxx_std_14)

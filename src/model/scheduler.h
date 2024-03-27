@@ -23,6 +23,12 @@ enum THRESHOLD_MODE {
   ABSOLUTE = 1
 };
 
+enum LR_RETURN_CODE {
+  SAME = 0,
+  REDUCED = 1,
+  EARLY_STOP = 2
+};
+
 // TODO refactor to ReduceLRSigmoid
 //void adjust_learning_rate(torch::optim::SGD &optimizer,
 //                          VALUE_TYPE max_lr,
@@ -45,6 +51,7 @@ enum THRESHOLD_MODE {
 class TORCH_API ReduceLROnPlateau : public torch::optim::LRScheduler {
  public:
   explicit ReduceLROnPlateau(torch::optim::Optimizer &optimizer,
+                             ID_TYPE initial_cooldown_epochs = 0,
                              METRICS_MODE mode = MIN,
                              double factor = 0.1,
                              ID_TYPE patience = 10,
@@ -54,7 +61,7 @@ class TORCH_API ReduceLROnPlateau : public torch::optim::LRScheduler {
                              double min_lr = 1e-7,
                              double eps = 1e-7);
 
-  RESPONSE check_step(VALUE_TYPE metrics, ID_TYPE epoch = -1);
+  LR_RETURN_CODE check_step(VALUE_TYPE metrics, ID_TYPE epoch = -1);
 
  private:
   std::vector<double> get_lrs() override;
@@ -65,6 +72,7 @@ class TORCH_API ReduceLROnPlateau : public torch::optim::LRScheduler {
   ID_TYPE patience_;
   ID_TYPE num_bad_epochs_;
 
+  ID_TYPE initial_cooldown_;
   ID_TYPE cooldown_;
   ID_TYPE cooldown_counter_;
 

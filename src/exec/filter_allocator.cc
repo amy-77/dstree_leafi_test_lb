@@ -3,7 +3,7 @@
 // Copyright (c) 2023 Université Paris Cité. All rights reserved.
 //
 
-#include "allocator.h"
+#include "filter_allocator.h"
 
 #include <random>
 #include <immintrin.h>
@@ -44,13 +44,21 @@ dstree::Allocator::Allocator(dstree::Config &config,
       node_size_threshold_ = current_node_size_threshold;
     }
   }
+#ifdef DEBUG
+  spdlog::info("allocator node size threshold = {:d}; default {:d}",
+               node_size_threshold_, config_.get().filter_default_node_size_threshold_);
+#endif
+
+  if (node_size_threshold_ < config_.get().filter_default_node_size_threshold_) {
+    node_size_threshold_ = config_.get().filter_default_node_size_threshold_;
 
 #ifdef DEBUG
-  spdlog::info("allocator node size threshold = {:d}", node_size_threshold_);
+    spdlog::info("allocator node size threshold rectified to default {:d}", node_size_threshold_);
 #endif
+  }
 }
 
-RESPONSE dstree::Allocator::push_instance(const dstree::FilterInfo &filter_info) {
+RESPONSE dstree::Allocator::push_filter_info(const FilterInfo &filter_info) {
   filter_infos_.push_back(filter_info);
 
   return SUCCESS;
@@ -213,7 +221,7 @@ RESPONSE dstree::Allocator::trial_collect_mthread() {
 
   ID_TYPE end_i_exclusive = filter_infos_.size();
   while (end_i_exclusive > 1 && filter_infos_[end_i_exclusive - 1].node_.get().get_size()
-      < config_.get().filter_trial_filter_preselection_size_threshold_) {
+      < config_.get().filter_default_node_size_threshold_) {
     end_i_exclusive -= 1;
   }
 
@@ -643,10 +651,23 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
 #endif
 
   if (!is_recall_calculated_) {
-    auto num_train_examples = static_cast<ID_TYPE>(
-        config_.get().filter_train_nexample_ * config_.get().filter_train_val_split_);
-    ID_TYPE num_valid_examples = config_.get().filter_train_nexample_ - num_train_examples;
-    ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+    ID_TYPE num_conformal_examples, num_train_examples;
+
+    if (config_.get().filter_train_num_local_example_ > 0) {
+      // contains both global and local examples
+      num_train_examples = static_cast<ID_TYPE>(
+          config_.get().filter_train_num_global_example_ * config_.get().filter_train_val_split_);
+      ID_TYPE num_global_valid_examples = config_.get().filter_train_num_global_example_ - num_train_examples;
+
+      num_conformal_examples = num_global_valid_examples;
+    } else {
+      // only contains global examples
+      num_train_examples = static_cast<ID_TYPE>(
+          config_.get().filter_train_nexample_ * config_.get().filter_train_val_split_);
+      ID_TYPE num_valid_examples = config_.get().filter_train_nexample_ - num_train_examples;
+
+      num_conformal_examples = num_valid_examples;
+    }
 
     auto nn_distances = upcite::make_reserved<VALUE_TYPE>(num_conformal_examples);
     auto nn_filter_ids = upcite::make_reserved<ID_TYPE>(num_conformal_examples);
@@ -676,7 +697,7 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
 #endif
 
     // two sentry points: recall at small error (recall_at_0_error, 0_error), recall at large error (0.999999, 42)
-    // corresponding errors were already added
+    // corresponding sentry errors should be added when building the conformal predictors
     validation_recalls_.reserve(num_conformal_examples + 2);
 
     // recall at validation error intervals

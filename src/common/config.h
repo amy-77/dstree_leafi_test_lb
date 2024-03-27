@@ -62,7 +62,6 @@ class Config {
   bool filter_train_is_gpu_;
   bool filter_infer_is_gpu_;
   ID_TYPE filter_device_id_;
-  ID_TYPE filter_train_nexample_;
   ID_TYPE filter_train_batchsize_;
   ID_TYPE filter_train_nepoch_;
   VALUE_TYPE filter_train_learning_rate_;
@@ -71,10 +70,26 @@ class Config {
   VALUE_TYPE filter_train_clip_grad_norm_type_;
   VALUE_TYPE filter_train_clip_grad_max_norm_;
 
-  ID_TYPE filter_num_synthetic_query_per_filter_;
   VALUE_TYPE filter_noise_level_;
 
+  /* obtaining training set */
+  // option 1: from a user-defined file
+  // disable option 1 by leaving filter_query_filepath_ default (nullptr)
   std::string filter_query_filepath_;
+  // if method 2 or 3 is deployed, filter_train_nexample_ will be set after queries are generated
+  ID_TYPE filter_train_nexample_;
+  // option 2: several synthetic queries per filter that is large enough
+  // disable option 2 by leaving filter_num_synthetic_query_per_filter_ default (-1)
+  ID_TYPE filter_num_synthetic_query_per_filter_;
+  // option 3: a set of global synthetic queries, shared by all filters,
+  // and a set of local synthetic queries, exclusive to each filter (that is large enough)
+  ID_TYPE filter_train_num_global_example_;
+  ID_TYPE filter_train_num_local_example_;
+
+  VALUE_TYPE filter_query_min_noise_;
+  VALUE_TYPE filter_query_max_noise_;
+
+  std::string dump_query_folderpath_; // predefined child folder
 
   bool filter_train_is_mthread_;
   ID_TYPE filter_collect_nthread_;
@@ -108,7 +123,6 @@ class Config {
   std::string filter_conformal_core_type_;
   VALUE_TYPE filter_conformal_confidence_;
   VALUE_TYPE filter_conformal_default_confidence_;
-  VALUE_TYPE filter_conformal_train_val_split_;
   VALUE_TYPE filter_conformal_recall_;
   bool filter_conformal_adjust_confidence_by_recall_;
 
@@ -125,7 +139,7 @@ class Config {
   VALUE_TYPE filter_trial_confidence_level_;
   ID_TYPE filter_trial_iterations_;
   ID_TYPE filter_trial_nnode_;
-  ID_TYPE filter_trial_filter_preselection_size_threshold_;
+  ID_TYPE filter_default_node_size_threshold_;
 
   bool filter_retrain_;
   bool filter_reallocate_single_;

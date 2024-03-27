@@ -71,6 +71,9 @@ class Node {
   VALUE_TYPE get_filter_nn_distance(ID_TYPE pos) const { return filter_->get_nn_distance(pos); };
   VALUE_TYPE get_filter_bsf_distance(ID_TYPE pos) const { return filter_->get_bsf_distance(pos); };
   VALUE_TYPE get_filter_pred_distance(ID_TYPE pos) const { return filter_->get_pred_distance(pos); };
+  std::tuple<VALUE_TYPE, VALUE_TYPE> get_filter_global_lnn_mean_std() const {
+    return filter_->get_global_lnn_mean_std();
+  };
 
   // TODO deprecate the object wrapper
   std::reference_wrapper<Filter> get_filter() { return std::ref(*filter_); }
@@ -119,8 +122,11 @@ class Node {
     }
   }
 
-  RESPONSE push_filter_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance, VALUE_TYPE lb_distance) {
-    return filter_->push_example(bsf_distance, nn_distance, lb_distance);
+  RESPONSE push_global_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance, VALUE_TYPE lb_distance) {
+    return filter_->push_global_example(bsf_distance, nn_distance, lb_distance);
+  }
+  RESPONSE push_local_example(VALUE_TYPE const *series, VALUE_TYPE nn_distance) {
+    return filter_->push_local_example(series, nn_distance);
   }
 
   std::vector<std::reference_wrapper<Node>>::iterator begin() {
@@ -157,6 +163,8 @@ class Node {
 
   ID_TYPE get_num_synthetic_queries(ID_TYPE node_size_threshold);
   RESPONSE synthesize_query(VALUE_TYPE *generated_queries, ID_TYPE &num_generated_queries, ID_TYPE node_size_threshold);
+
+  VALUE_TYPE const *get_series_ptr_by_id(ID_TYPE series_id) { return buffer_.get().get_series_ptr_by_id(series_id); }
 
  private:
   ID_TYPE depth_, id_;

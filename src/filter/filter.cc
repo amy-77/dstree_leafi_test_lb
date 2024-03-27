@@ -27,6 +27,7 @@
 namespace fs = boost::filesystem;
 
 namespace dstree = upcite::dstree;
+namespace constant = upcite::constant;
 
 dstree::Filter::Filter(dstree::Config &config,
                        ID_TYPE id,
@@ -34,11 +35,12 @@ dstree::Filter::Filter(dstree::Config &config,
     config_(config),
     id_(id),
     is_active_(false),
-    shared_train_queries_(shared_train_queries),
+    global_queries_(shared_train_queries),
     is_trained_(false),
     is_distances_preprocessed_(false),
     is_distances_logged(false),
-    train_size_(0),
+    global_data_size_(0),
+    local_data_size_(0),
     model_setting_ref_(MODEL_SETTING_PLACEHOLDER_REF) {
 //  torch::Device device = torch::Device(c10::DeviceType::Lazy);
 
@@ -54,8 +56,8 @@ dstree::Filter::Filter(dstree::Config &config,
   model_ = nullptr;
 
   if (!config.to_load_index_) {
-    bsf_distances_.reserve(config.filter_train_nexample_);
-    nn_distances_.reserve(config.filter_train_nexample_);
+    global_bsf_distances_.reserve(config.filter_train_nexample_);
+    global_lnn_distances_.reserve(config.filter_train_nexample_);
     lb_distances_.reserve(config.filter_train_nexample_);
   }
 
@@ -68,9 +70,9 @@ dstree::Filter::Filter(dstree::Config &config,
 }
 
 RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_runtime_stat) {
-  ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
-  ID_TYPE num_valid_examples = train_size_ - num_train_examples;
-  ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+  ID_TYPE num_global_train_examples = global_data_size_ * config_.get().filter_train_val_split_;
+  ID_TYPE num_global_valid_examples = global_data_size_ - num_global_train_examples;
+  ID_TYPE num_conformal_examples = num_global_valid_examples;
 
   auto residuals = upcite::make_reserved<ERROR_TYPE>(num_conformal_examples + 2);
 
@@ -83,20 +85,53 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_run
       residuals.push_back(dist(e2));
     }
   } else {
-    // residuals with two sentries, i.e., 0 and max_pred_distance
-    residuals.push_back(0);
-    residuals.push_back(*std::max_element(std::begin(pred_distances_) + num_train_examples,
-                                          std::begin(pred_distances_) + num_train_examples + num_conformal_examples));
+    VALUE_TYPE max_diff = constant::MIN_VALUE, mean_diff = 0, std_diff = 0;
+    ID_TYPE num_diff = 0;
 
     for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
       // TODO torch::Tensor to ptr is not stable
-      if (pred_distances_[num_train_examples + i] > constant::MIN_VALUE &&
-          pred_distances_[num_train_examples + i] < constant::MAX_VALUE &&
-          !upcite::equals_zero(pred_distances_[num_train_examples + i])) {
+      if (global_pred_distances_[num_global_train_examples + i] > constant::MIN_VALUE &&
+          global_pred_distances_[num_global_train_examples + i] < constant::MAX_VALUE &&
+          !upcite::equals_zero(global_pred_distances_[num_global_train_examples + i])) {
         // TODO not necessary for global symmetrical confidence intervals
-        residuals.emplace_back(pred_distances_[num_train_examples + i] - nn_distances_[num_train_examples + i]);
+        VALUE_TYPE diff = abs(global_pred_distances_[num_global_train_examples + i]
+                                  - global_lnn_distances_[num_global_train_examples + i]);
+
+        if (diff > max_diff) {
+          max_diff = diff;
+        }
+        mean_diff += diff;
+        num_diff += 1;
+
+        residuals.emplace_back(diff);
       }
     }
+
+    if (num_diff < num_conformal_examples) {
+      spdlog::error("conformal filter {:d} model {:s} collected {:d} pred diff; expected {:d}",
+                    id_, model_setting_ref_.get().model_setting_str, num_diff, num_conformal_examples);
+    }
+
+    mean_diff /= num_diff;
+
+    for (ID_TYPE diff_i = 0; diff_i < num_diff; ++diff_i) {
+      std_diff += (residuals[diff_i] - mean_diff) * (residuals[diff_i] - mean_diff);
+    }
+
+    std_diff = sqrt(std_diff / num_diff);
+    VALUE_TYPE max_normal_value = mean_diff + 3 * std_diff + constant::EPSILON_GAP;
+
+    max_diff += constant::EPSILON_GAP;
+    if (max_normal_value < max_diff) {
+      max_normal_value = max_diff;
+    }
+
+    // add the first of two sentries: 0
+    residuals.push_back(0);
+
+    // add the second of two sentries: max range upper boundary
+    // previously using the max pred value
+    residuals.push_back(max_normal_value);
   }
 
   if (is_trial && !collect_runtime_stat) {
@@ -147,14 +182,14 @@ RESPONSE dstree::Filter::train(bool is_trial) {
     return FAILURE;
   }
 
-  if (train_size_ < config_.get().filter_train_nexample_) {
-    spdlog::error("{:d} train examples collected; expected {:d}",
-                  train_size_, config_.get().filter_train_nexample_);
-
-    // TODO bind a wrapper for spdlog::shutdown and exit
-    spdlog::shutdown();
-    exit(FAILURE);
-  }
+//  if (global_data_size_ < config_.get().filter_train_nexample_) {
+//    spdlog::error("{:d} train examples collected; expected {:d}",
+//                  global_data_size_, config_.get().filter_train_nexample_);
+//
+//    // TODO bind a wrapper for spdlog::shutdown and exit
+//    spdlog::shutdown();
+//    exit(FAILURE);
+//  }
 
   if (!is_active_ && !is_trial) {
     spdlog::error("filter {:d} neither is_active nor is_trial; exit", id_);
@@ -167,23 +202,21 @@ RESPONSE dstree::Filter::train(bool is_trial) {
     stream_id = at::cuda::getCurrentCUDAStream(config_.get().filter_device_id_).id(); // compiles with libtorch-gpu
   }
 
-  // TODO instantiate the model according to the assigned model_setting_
-  model_ = std::make_shared<dstree::MLPFilter>(config_.get().series_length_,
-                                               config_.get().filter_dim_latent_,
-                                               config_.get().filter_train_dropout_p_,
-                                               config_.get().filter_leaky_relu_negative_slope_);
-
-  model_->to(*device_);
-
   if (config_.get().filter_remove_square_ && !is_distances_preprocessed_) {
-    for (ID_TYPE i = 0; i < train_size_; ++i) {
-      nn_distances_[i] = sqrt(nn_distances_[i]);
-      bsf_distances_[i] = sqrt(bsf_distances_[i]);
+    for (ID_TYPE i = 0; i < global_data_size_; ++i) {
+      global_lnn_distances_[i] = sqrt(global_lnn_distances_[i]);
+      global_bsf_distances_[i] = sqrt(global_bsf_distances_[i]);
     }
 
     if (!lb_distances_.empty()) {
-      for (ID_TYPE i = 0; i < train_size_; ++i) {
+      for (ID_TYPE i = 0; i < global_data_size_; ++i) {
         lb_distances_[i] = sqrt(lb_distances_[i]);
+      }
+    }
+
+    if (local_data_size_ > 0) {
+      for (ID_TYPE i = 0; i < local_data_size_; ++i) {
+        local_lnn_distances_[i] = sqrt(local_lnn_distances_[i]);
       }
     }
 
@@ -196,41 +229,122 @@ RESPONSE dstree::Filter::train(bool is_trial) {
     if (!lb_distances_.empty()) {
       spdlog::debug("filter {:d} stream {:d} d_node{:s} = {:s}",
                     id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
-                    upcite::array2str(lb_distances_.data(), train_size_));
+                    upcite::array2str(lb_distances_.data(), global_data_size_));
     }
 
     spdlog::debug("filter {:d} stream {:d} d_bsf{:s} = {:s}",
                   id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
-                  upcite::array2str(bsf_distances_.data(), train_size_));
+                  upcite::array2str(global_bsf_distances_.data(), global_data_size_));
 
-    spdlog::debug("filter {:d} stream {:d} d_nn{:s} = {:s}",
+    spdlog::debug("filter {:d} stream {:d} global d_nn{:s} = {:s}",
                   id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
-                  upcite::array2str(nn_distances_.data(), train_size_));
+                  upcite::array2str(global_lnn_distances_.data(), global_data_size_));
+
+    if (local_data_size_ > 0) {
+      spdlog::debug("filter {:d} stream {:d} local d_nn{:s} = {:s}",
+                    id_, stream_id, config_.get().filter_remove_square_ ? "" : "_sq",
+                    upcite::array2str(local_lnn_distances_.data(), local_data_size_));
+    }
 
     is_distances_logged = true;
   }
 //#endif
 #endif
 
-  ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
+  ID_TYPE num_train_examples = global_data_size_ * config_.get().filter_train_val_split_;
+  ID_TYPE num_valid_examples = global_data_size_ - num_train_examples;
 
-  auto train_data = shared_train_queries_.get().index({torch::indexing::Slice(0, num_train_examples)}).clone();
-  auto train_dataset = upcite::SeriesDataset(train_data, nn_distances_, num_train_examples, *device_);
+  torch::Tensor train_data, valid_data;
+  torch::Tensor train_targets, valid_targets;
+
+  if (local_data_size_ > 0) {
+    ID_TYPE num_global_train_examples = global_data_size_ * config_.get().filter_train_val_split_;
+    ID_TYPE num_local_train_examples = local_data_size_ * config_.get().filter_train_val_split_;
+
+    torch::Tensor global_train_data = global_queries_.get().index(
+        {torch::indexing::Slice(0, num_train_examples)}).clone();
+    torch::Tensor global_train_targets = torch::from_blob(global_lnn_distances_.data(),
+                                                          num_global_train_examples,
+                                                          torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+
+    torch::Tensor local_train_data = torch::from_blob(local_queries_.data(),
+                                                      {num_local_train_examples, config_.get().series_length_},
+                                                      torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+    torch::Tensor local_train_targets = torch::from_blob(local_lnn_distances_.data(),
+                                                         num_local_train_examples,
+                                                         torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+
+    train_data = torch::cat({global_train_data, local_train_data}, 0);
+    train_targets = torch::cat({global_train_targets, local_train_targets}, 0);
+
+    ID_TYPE num_global_valid_examples = global_data_size_ - num_global_train_examples;
+    ID_TYPE num_local_valid_examples = local_data_size_ - num_local_train_examples;
+
+    torch::Tensor global_valid_data = global_queries_.get().index(
+        {torch::indexing::Slice(num_train_examples, global_data_size_)}).clone();
+    torch::Tensor global_valid_targets = torch::from_blob(global_lnn_distances_.data() + num_global_train_examples,
+                                                          num_global_valid_examples,
+                                                          torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+
+    torch::Tensor local_valid_data = torch::from_blob(
+        local_queries_.data() + num_local_train_examples * config_.get().series_length_,
+        {num_local_valid_examples, config_.get().series_length_},
+        torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+    torch::Tensor local_valid_targets = torch::from_blob(local_lnn_distances_.data() + num_local_train_examples,
+                                                         num_local_valid_examples,
+                                                         torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+
+    valid_data = torch::cat({global_valid_data, local_valid_data}, 0);
+    valid_targets = torch::cat({global_valid_targets, local_valid_targets}, 0);
+
+    num_train_examples = num_global_train_examples + num_local_train_examples;
+    num_valid_examples = num_global_valid_examples + num_local_valid_examples;
+
+    assert(train_data.size(0) == num_train_examples && train_targets.size(0) == num_train_examples);
+    assert(valid_data.size(0) == num_train_examples && valid_targets.size(0) == num_train_examples);
+  } else {
+    train_data = global_queries_.get().index({torch::indexing::Slice(0, num_train_examples)}).clone();
+    train_targets = torch::from_blob(global_lnn_distances_.data(),
+                                     num_train_examples,
+                                     torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+
+    valid_data = global_queries_.get().index({torch::indexing::Slice(
+        num_train_examples, global_data_size_)}).clone();
+    valid_targets = torch::from_blob(global_lnn_distances_.data() + num_train_examples,
+                                     num_valid_examples,
+                                     torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
+  }
+
+  auto train_dataset = upcite::SeriesDataset(train_data, train_targets);
   auto train_data_loader = torch::data::make_data_loader<torch::data::samplers::RandomSampler>(
       train_dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
 
-  ID_TYPE num_valid_examples = train_size_ - num_train_examples;
-  auto valid_data = shared_train_queries_.get().index({torch::indexing::Slice(
-      num_train_examples, train_size_)}).clone();
-  auto valid_target = torch::from_blob(nn_distances_.data() + num_train_examples,
-                                       num_valid_examples,
-                                       torch::TensorOptions().dtype(TORCH_VALUE_TYPE)).to(*device_);
-  auto valid_dataset = upcite::SeriesDataset(valid_data, valid_target);
-  auto valid_data_loader = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
-      valid_dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
+//  auto valid_dataset = upcite::SeriesDataset(valid_data, valid_targets);
+//  auto valid_data_loader = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
+//      valid_dataset.map(torch::data::transforms::Stack<>()), config_.get().filter_train_batchsize_);
+
+  // reuse validation examples as conformal examples
+  ID_TYPE num_conformal_examples = num_valid_examples;
+  torch::Tensor conformal_data = valid_data;
+  torch::Tensor conformal_targets = valid_targets;
+
+  // TODO instantiate the model according to the assigned model_setting_
+  model_ = std::make_shared<dstree::MLPFilter>(config_.get().series_length_,
+                                               config_.get().filter_dim_latent_,
+                                               config_.get().filter_train_dropout_p_,
+                                               config_.get().filter_leaky_relu_negative_slope_);
+
+  model_->to(*device_);
+
+  // for early termination
+  std::unordered_map<std::string, torch::Tensor> best_model_state;
+  VALUE_TYPE best_validation_loss = constant::MAX_VALUE;
+  ID_TYPE best_validation_epoch = -1;
 
   torch::optim::SGD optimizer(model_->parameters(), config_.get().filter_train_learning_rate_);
-  upcite::optim::ReduceLROnPlateau lr_scheduler = upcite::optim::ReduceLROnPlateau(optimizer);
+
+  size_t initial_cooldown_epochs = config_.get().filter_train_nepoch_ / 2;
+  upcite::optim::ReduceLROnPlateau lr_scheduler = upcite::optim::ReduceLROnPlateau(optimizer, initial_cooldown_epochs);
 
 //  torch::nn::HuberLoss huber_loss(torch::nn::HuberLossOptions().reduction(torch::kMean).delta(1.0));
   torch::nn::MSELoss mse_loss(torch::nn::MSELossOptions().reduction(torch::kMean));
@@ -286,11 +400,27 @@ RESPONSE dstree::Filter::train(bool is_trial) {
       torch::Tensor prediction = model_->forward(valid_data);
 
 //      valid_loss = huber_loss->forward(prediction, valid_targets).detach().item<VALUE_TYPE>();
-      valid_loss = mse_loss->forward(prediction, valid_target).detach().item<VALUE_TYPE>();
+      valid_loss = mse_loss->forward(prediction, valid_targets).detach().item<VALUE_TYPE>();
 
 #ifdef DEBUG
       valid_losses.push_back(valid_loss);
 #endif
+
+      if (epoch > initial_cooldown_epochs) {
+        if (best_validation_loss > valid_loss) {
+          best_validation_loss = valid_loss;
+          best_validation_epoch = epoch;
+
+          for (const auto &pair : model_->named_parameters()) {
+            best_model_state[pair.key()] = pair.value().clone();
+          }
+        }
+      }
+
+      upcite::optim::LR_RETURN_CODE return_code = lr_scheduler.check_step(valid_loss);
+      if (return_code == upcite::optim::EARLY_STOP) {
+        epoch = config_.get().filter_train_nepoch_;
+      }
     }
   }
 
@@ -301,22 +431,31 @@ RESPONSE dstree::Filter::train(bool is_trial) {
   spdlog::debug("filter {:d} stream {:d} model {:s} v_losses = {:s}",
                 id_, stream_id, model_setting_ref_.get().model_setting_str,
                 upcite::array2str(valid_losses.data(), config_.get().filter_train_nepoch_));
+
+  spdlog::debug("filter {:d} stream {:d} model {:s} restore from epoch {:d} of v_loss {:.4f}",
+                id_, stream_id, model_setting_ref_.get().model_setting_str,
+                best_validation_epoch, best_validation_loss);
 #endif
 
-//    torch::NoGradGuard no_grad;
   c10::InferenceMode guard;
+
+  for (auto &pair : best_model_state) {
+    model_->named_parameters()[pair.first].detach_();
+    model_->named_parameters()[pair.first].copy_(pair.second);
+  }
+
   model_->eval();
 
-  auto prediction = model_->forward(shared_train_queries_).detach().cpu();
+  auto prediction = model_->forward(global_queries_).detach().cpu();
   VALUE_TYPE *predictions_array = prediction.detach().cpu().contiguous().data_ptr<VALUE_TYPE>();
 
-  pred_distances_.insert(pred_distances_.end(), predictions_array, predictions_array + train_size_);
+  global_pred_distances_.insert(global_pred_distances_.end(), predictions_array, predictions_array + global_data_size_);
 
 #ifdef DEBUG
-  spdlog::info("filter {:d} stream {:d} model {:s} d_pred{:s} = {:s}",
+  spdlog::info("filter {:d} stream {:d} model {:s} global d_pred{:s} = {:s}",
                id_, stream_id, model_setting_ref_.get().model_setting_str,
                config_.get().filter_remove_square_ ? "" : "_sq",
-               upcite::array2str(predictions_array, train_size_));
+               upcite::array2str(predictions_array, global_data_size_));
 #endif
 
   if (config_.get().filter_is_conformal_) {
@@ -363,7 +502,7 @@ RESPONSE dstree::Filter::collect_running_info(MODEL_SETTING &model_setting) {
 
   model_setting_ref_.get().gpu_mem_mb = static_cast<VALUE_TYPE>(memory_size) / (1024 * 1024);
 
-  auto trial_query = shared_train_queries_.get().index({torch::indexing::Slice(0, 1)}).clone();
+  auto trial_query = global_queries_.get().index({torch::indexing::Slice(0, 1)}).clone();
   auto trial_predictions = make_reserved<VALUE_TYPE>(config_.get().filter_trial_iterations_);
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -448,21 +587,23 @@ VALUE_TYPE dstree::Filter::infer(torch::Tensor &query_series) const {
 }
 
 RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
-  node_fos.write(reinterpret_cast<const char *>(&train_size_), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(&global_data_size_), sizeof(ID_TYPE));
 
   // TODO condense size indicators into a bitmap, as they all = train_size_
   // bsf_distances_
-  ID_TYPE size_placeholder = bsf_distances_.size();
+  ID_TYPE size_placeholder = global_bsf_distances_.size();
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
-  if (!bsf_distances_.empty()) {
-    node_fos.write(reinterpret_cast<const char *>(bsf_distances_.data()), sizeof(VALUE_TYPE) * bsf_distances_.size());
+  if (!global_bsf_distances_.empty()) {
+    node_fos.write(reinterpret_cast<const char *>(global_bsf_distances_.data()),
+                   sizeof(VALUE_TYPE) * global_bsf_distances_.size());
   }
 
   // nn_distances_
-  size_placeholder = nn_distances_.size();
+  size_placeholder = global_lnn_distances_.size();
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
-  if (!nn_distances_.empty()) {
-    node_fos.write(reinterpret_cast<const char *>(nn_distances_.data()), sizeof(VALUE_TYPE) * nn_distances_.size());
+  if (!global_lnn_distances_.empty()) {
+    node_fos.write(reinterpret_cast<const char *>(global_lnn_distances_.data()),
+                   sizeof(VALUE_TYPE) * global_lnn_distances_.size());
   }
 
   // lb_distances_
@@ -480,10 +621,32 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
   }
 
   // pred_distances_
-  size_placeholder = pred_distances_.size();
+  size_placeholder = global_pred_distances_.size();
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
-  if (!pred_distances_.empty()) {
-    node_fos.write(reinterpret_cast<const char *>(pred_distances_.data()), sizeof(VALUE_TYPE) * pred_distances_.size());
+  if (!global_pred_distances_.empty()) {
+    node_fos.write(reinterpret_cast<const char *>(global_pred_distances_.data()),
+                   sizeof(VALUE_TYPE) * global_pred_distances_.size());
+  }
+
+  node_fos.write(reinterpret_cast<const char *>(&local_data_size_), sizeof(ID_TYPE));
+
+  if (local_data_size_ > 0) {
+    // local_queries_
+    size_placeholder = local_queries_.size();
+    node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+    if (!local_queries_.empty()) {
+      node_fos.write(reinterpret_cast<const char *>(local_queries_.data()),
+                     sizeof(VALUE_TYPE) * local_queries_.size());
+    }
+
+    // local_lnn_distances_
+    size_placeholder = local_lnn_distances_.size();
+    node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+    if (!local_lnn_distances_.empty()) {
+      node_fos.write(reinterpret_cast<const char *>(local_lnn_distances_.data()),
+                     sizeof(VALUE_TYPE) * local_lnn_distances_.size());
+    }
+
   }
 
   if (is_active_) {
@@ -501,7 +664,7 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
   if (is_trained_) {
     is_trained_placeholder = 1;
   }
-  node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+  node_fos.write(reinterpret_cast<const char *>(&is_trained_placeholder), sizeof(ID_TYPE));
   if (is_trained_) {
     std::string model_filepath = config_.get().dump_filters_folderpath_ + std::to_string(id_) +
         config_.get().model_dump_file_postfix_;
@@ -528,7 +691,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   // train_size_
   ID_TYPE read_nbytes = sizeof(ID_TYPE);
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-  train_size_ = ifs_id_buf[0];
+  global_data_size_ = ifs_id_buf[0];
 
   // bsf_distances_
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
@@ -537,7 +700,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   if (size_indicator > 0) {
     read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-    bsf_distances_.insert(bsf_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+    global_bsf_distances_.insert(global_bsf_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
   }
 
   // nn_distances_
@@ -548,7 +711,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   if (size_indicator > 0) {
     read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-    nn_distances_.insert(nn_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+    global_lnn_distances_.insert(global_lnn_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
   }
 
   // lb_distances_
@@ -581,7 +744,34 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   if (size_indicator > 0) {
     read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-    pred_distances_.insert(pred_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+    global_pred_distances_.insert(global_pred_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+  }
+
+  // local_data_size_
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  local_data_size_ = ifs_id_buf[0];
+
+  // local_queries_
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_indicator = ifs_id_buf[0];
+
+  if (size_indicator > 0) {
+    read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+    node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+    local_queries_.insert(local_queries_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+  }
+
+  // local_lnn_distances_
+  read_nbytes = sizeof(ID_TYPE);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  size_indicator = ifs_id_buf[0];
+
+  if (size_indicator > 0) {
+    read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+    node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+    local_lnn_distances_.insert(local_lnn_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
   }
 
   // model_setting_
@@ -658,13 +848,13 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
 }
 
 VALUE_TYPE dstree::Filter::get_node_summarization_pruning_frequency() const {
-  if (lb_distances_.empty() || lb_distances_.size() != bsf_distances_.size()) {
+  if (lb_distances_.empty() || lb_distances_.size() != global_bsf_distances_.size()) {
     return 0;
   }
 
   ID_TYPE pruned_counter = 0;
   for (ID_TYPE i = 0; i < lb_distances_.size(); ++i) {
-    if (lb_distances_[i] > bsf_distances_[i]) {
+    if (lb_distances_[i] > global_bsf_distances_[i]) {
       pruned_counter += 1;
     }
   }
@@ -673,15 +863,13 @@ VALUE_TYPE dstree::Filter::get_node_summarization_pruning_frequency() const {
 }
 
 VALUE_TYPE upcite::dstree::Filter::get_val_pruning_ratio() const {
-  ID_TYPE num_train_examples = train_size_ * config_.get().filter_train_val_split_;
-  ID_TYPE num_valid_examples = train_size_ - num_train_examples;
-  ID_TYPE num_conformal_examples = num_valid_examples * config_.get().filter_conformal_train_val_split_;
+  ID_TYPE num_global_train_examples = global_data_size_ * config_.get().filter_train_val_split_;
 
   VALUE_TYPE abs_error_interval = get_abs_error_interval();
   ID_TYPE pruned_counter = 0;
 
-  for (ID_TYPE example_i = num_train_examples; example_i < num_train_examples + num_conformal_examples; ++example_i) {
-    if (pred_distances_[example_i] - abs_error_interval > bsf_distances_[example_i]) {
+  for (ID_TYPE example_i = num_global_train_examples; example_i < global_data_size_; ++example_i) {
+    if (global_pred_distances_[example_i] - abs_error_interval > global_bsf_distances_[example_i]) {
       pruned_counter += 1;
     }
   }
@@ -698,5 +886,6 @@ VALUE_TYPE upcite::dstree::Filter::get_val_pruning_ratio() const {
 #endif
 #endif
 
-  return static_cast<VALUE_TYPE>(pruned_counter) / num_conformal_examples;
+  ID_TYPE num_global_valid_examples = global_data_size_ - num_global_train_examples;
+  return static_cast<VALUE_TYPE>(pruned_counter) / num_global_valid_examples;
 }

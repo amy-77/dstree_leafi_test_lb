@@ -20,7 +20,7 @@
 #include "global.h"
 #include "config.h"
 #include "logger.h"
-#include "filter_core.h"
+#include "models.h"
 
 namespace dstree = upcite::dstree;
 

@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
   }
 
   if (config->on_disk_ || config->to_dump_index_) {
-    index->dump();
+    status = static_cast<RESPONSE>(status | index->dump());
   }
 
   if (status == FAILURE) {

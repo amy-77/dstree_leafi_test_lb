@@ -17,7 +17,7 @@
 #include "buffer.h"
 #include "node.h"
 #include "filter.h"
-#include "allocator.h"
+#include "filter_allocator.h"
 #include "navigator.h"
 
 namespace upcite {

@@ -3,8 +3,8 @@
 // Copyright (c) 2023 Université Paris Cité. All rights reserved.
 //
 
-#ifndef DSTREE_SRC_EXEC_ALLOCATOR_H_
-#define DSTREE_SRC_EXEC_ALLOCATOR_H_
+#ifndef DSTREE_SRC_EXEC_FILTER_ALLOCATOR_H_
+#define DSTREE_SRC_EXEC_FILTER_ALLOCATOR_H_
 
 #include <vector>
 #include <map>
@@ -12,7 +12,7 @@
 
 #include "global.h"
 #include "config.h"
-#include "filter_core.h"
+#include "models.h"
 #include "node.h"
 
 namespace upcite {
@@ -53,13 +53,13 @@ class Allocator {
                      ID_TYPE nfilters = -1);
   ~Allocator() = default;
 
-  RESPONSE push_instance(const FilterInfo &filter_info);
+  RESPONSE push_filter_info(const FilterInfo &filter_info);
 
   RESPONSE assign();
   RESPONSE reassign();
 
   RESPONSE set_confidence_from_recall();
-  ID_TYPE get_node_size_threshold() {
+  ID_TYPE get_node_size_threshold() const {
     return node_size_threshold_;
   }
 
@@ -97,4 +97,4 @@ class Allocator {
 } // namespace dstree
 } // namespace upcite
 
-#endif //DSTREE_SRC_EXEC_ALLOCATOR_H_
+#endif //DSTREE_SRC_EXEC_FILTER_ALLOCATOR_H_

@@ -64,8 +64,8 @@ dstree::Config::Config(int argc, char *argv[]) :
     sketch_length_(-1),
     train_sketch_filepath_(""),
     query_sketch_filepath_(""),
-    filter_query_id_filename_("sampled_indices.bin"),
-    filter_query_filename_("generated_queries.bin"),
+    filter_query_id_filename_("global_sampled_indices.bin"),
+    filter_query_filename_("global_generated_queries.bin"),
     filter_query_noise_level_(0.1),
     to_dump_index_(false),
     model_dump_file_postfix_(".pickle"),
@@ -82,7 +82,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_conformal_core_type_("discrete"),
     filter_conformal_confidence_(-1),
     filter_conformal_default_confidence_(0.95),
-    filter_conformal_train_val_split_(0.9),
+//    filter_conformal_train_val_split_(0.9),
     filter_max_gpu_memory_mb_(constant::MAX_VALUE),
     filter_model_setting_str_(""),
     filter_candidate_settings_filepath_(""),
@@ -96,7 +96,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_trial_confidence_level_(0.95),
     filter_trial_iterations_(20000),
     filter_trial_nnode_(32),
-    filter_trial_filter_preselection_size_threshold_(64),
+    filter_default_node_size_threshold_(64),
     filter_retrain_(false),
     filter_reallocate_single_(false),
     filter_reallocate_multi_(false),
@@ -106,7 +106,13 @@ dstree::Config::Config(int argc, char *argv[]) :
     navigator_is_combined_(false),
     navigator_combined_lambda_(0.2),
     navigator_is_gpu_(false),
-    navigator_train_val_split_(0.9) {
+    navigator_train_val_split_(0.9),
+    filter_num_synthetic_query_per_filter_(-1),
+    filter_train_num_global_example_(-1),
+    filter_train_num_local_example_(-1),
+    filter_query_min_noise_(0.1),
+    filter_query_max_noise_(0.4),
+    dump_query_folderpath_("") {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -223,9 +229,9 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Filter conformal core type (discrete, spline (i.e., smoothened); defaults: discrete)")
       ("filter_conformal_confidence", po::value<VALUE_TYPE>(&filter_conformal_confidence_)->default_value(-1),
        "Filter conformal confidence level ([0, 1])")
-      ("filter_conformal_train_val_split",
-       po::value<VALUE_TYPE>(&filter_conformal_train_val_split_)->default_value(0.9),
-       "Filter conformal train/val split ratio")
+//      ("filter_conformal_train_val_split",
+//       po::value<VALUE_TYPE>(&filter_conformal_train_val_split_)->default_value(0.9),
+//       "Filter conformal train/val split ratio")
       ("filter_max_gpu_memory_mb",
        po::value<VALUE_TYPE>(&filter_max_gpu_memory_mb_)->default_value(constant::MAX_VALUE),
        "Filter max gpu memory to be used")
@@ -254,7 +260,7 @@ dstree::Config::Config(int argc, char *argv[]) :
        po::value<ID_TYPE>(&filter_trial_iterations_)->default_value(20000),
        "Filter no. queries for model speed test (default: 20000)")
       ("filter_trial_filter_preselection_size_threshold",
-       po::value<ID_TYPE>(&filter_trial_filter_preselection_size_threshold_)->default_value(8),
+       po::value<ID_TYPE>(&filter_default_node_size_threshold_)->default_value(8),
        "Filter size threshold to run trials (default: 8)")
       ("filter_trial_nnode",
        po::value<ID_TYPE>(&filter_trial_nnode_)->default_value(32),
@@ -288,7 +294,22 @@ dstree::Config::Config(int argc, char *argv[]) :
        "Whether to re-allocate the learned filters")
       ("filter_reallocate_multi",
        po::bool_switch(&filter_reallocate_multi_)->default_value(false),
-       "Whether to re-allocate the learned filters");
+       "Whether to re-allocate the learned filters")
+      ("filter_num_synthetic_query_per_filter",
+       po::value<ID_TYPE>(&filter_num_synthetic_query_per_filter_)->default_value(-1),
+       "The no. synthetic queries to generate per node")
+      ("filter_train_num_global_example",
+       po::value<ID_TYPE>(&filter_train_num_global_example_)->default_value(-1),
+       "The no. global synthetic queries (per index; default: -1)")
+      ("filter_train_num_local_example",
+       po::value<ID_TYPE>(&filter_train_num_local_example_)->default_value(-1),
+       "The no. local synthetic queries (per node; default: -1)")
+      ("filter_query_min_noise",
+       po::value<VALUE_TYPE>(&filter_query_min_noise_)->default_value(0.1),
+       "The min noise level to add to a random series to generate a synthetic query")
+      ("filter_query_max_noise",
+       po::value<VALUE_TYPE>(&filter_query_max_noise_)->default_value(0.4),
+       "The max noise level to add to a random series to generate a synthetic query");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -328,7 +349,8 @@ dstree::Config::Config(int argc, char *argv[]) :
       filter_dim_latent_ = series_length_;
     }
 
-    if (filter_train_nexample_ < 0 && !to_load_index_) {
+    if ((filter_train_nexample_ <= 0 && filter_num_synthetic_query_per_filter_ <= 0
+        && filter_train_num_global_example_ <= 0) && !to_load_index_) {
       std::cout << "Please specify the number of neurofilter train examples by setting --neurofilter_train_nexample"
                 << std::endl;
       exit(-1);
@@ -429,6 +451,17 @@ dstree::Config::Config(int argc, char *argv[]) :
       }
       if (!fs::is_directory(dump_filters_folderpath_)) {
         fs::create_directory(dump_filters_folderpath_);
+      }
+
+      if (filter_train_num_local_example_ > 0) {
+        if (dump_query_folderpath_.empty()) {
+          dump_query_folderpath_ = index_dump_folderpath_ + "query/";
+        } else if (!boost::algorithm::ends_with(dump_query_folderpath_, "/")) {
+          dump_query_folderpath_ += "/";
+        }
+        if (!fs::is_directory(dump_query_folderpath_)) {
+          fs::create_directory(dump_query_folderpath_);
+        }
       }
     }
   }
@@ -605,7 +638,7 @@ void dstree::Config::log() {
   spdlog::info("filter_conformal_core_type = {:s}", filter_conformal_core_type_);
   spdlog::info("filter_conformal_confidence = {:.3f}", filter_conformal_confidence_);
   spdlog::info("filter_conformal_default_confidence = {:.3f}", filter_conformal_default_confidence_);
-  spdlog::info("filter_conformal_train_val_split = {:.3f}", filter_conformal_train_val_split_);
+//  spdlog::info("filter_conformal_train_val_split = {:.3f}", filter_conformal_train_val_split_);
 
   spdlog::info("filter_max_gpu_memory_mb = {:.1f}", filter_max_gpu_memory_mb_);
   spdlog::info("filter_model_setting_str = {:s}", filter_model_setting_str_);
@@ -622,7 +655,7 @@ void dstree::Config::log() {
   spdlog::info("filter_trial_confidence_level = {:.6f}", filter_trial_confidence_level_);
   spdlog::info("filter_trial_iterations = {:d}", filter_trial_iterations_);
   spdlog::info("filter_trial_nnode = {:d}", filter_trial_nnode_);
-  spdlog::info("filter_trial_filter_preselection_size_threshold_ = {:d}", filter_trial_filter_preselection_size_threshold_);
+  spdlog::info("filter_trial_filter_preselection_size_threshold_ = {:d}", filter_default_node_size_threshold_);
   spdlog::info("allocator_cpu_trial_iterations = {:d}", allocator_cpu_trial_iterations_);
 
   spdlog::info("filter_retrain = {:b}", filter_retrain_);
@@ -635,4 +668,11 @@ void dstree::Config::log() {
   spdlog::info("navigator_combined_lambda = {:.6f}", navigator_combined_lambda_);
   spdlog::info("navigator_is_gpu = {:b}", navigator_is_gpu_);
   spdlog::info("navigator_train_val_split = {:.3f}", navigator_train_val_split_);
+
+  spdlog::info("filter_num_synthetic_query_per_filter = {:d}", filter_num_synthetic_query_per_filter_);
+  spdlog::info("filter_train_num_global_example = {:d}", filter_train_num_global_example_);
+  spdlog::info("filter_train_num_local_example = {:d}", filter_train_num_local_example_);
+  spdlog::info("filter_query_min_noise = {:.3f}", filter_query_min_noise_);
+  spdlog::info("filter_query_max_noise = {:.3f}", filter_query_max_noise_);
+  spdlog::info("dump_query_folderpath = {:s}", dump_query_folderpath_);
 }

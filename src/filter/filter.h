@@ -15,7 +15,8 @@
 #include "global.h"
 #include "config.h"
 #include "conformal.h"
-#include "filter_core.h"
+#include "models.h"
+#include "stat.h"
 
 namespace upcite {
 namespace dstree {
@@ -27,13 +28,22 @@ class Filter {
          std::reference_wrapper<torch::Tensor> shared_train_queries);
   ~Filter() = default;
 
-  RESPONSE push_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance, VALUE_TYPE lb_distance) {
-    bsf_distances_.push_back(bsf_distance);
-    nn_distances_.push_back(nn_distance);
+  RESPONSE push_global_example(VALUE_TYPE bsf_distance, VALUE_TYPE nn_distance, VALUE_TYPE lb_distance) {
+    global_bsf_distances_.push_back(bsf_distance);
+    global_lnn_distances_.push_back(nn_distance);
 
     lb_distances_.push_back(lb_distance);
 
-    train_size_ += 1;
+    global_data_size_ += 1;
+
+    return SUCCESS;
+  };
+
+  RESPONSE push_local_example(VALUE_TYPE const *query, VALUE_TYPE nn_distance) {
+    local_queries_.insert(local_queries_.end(), query, query + config_.get().series_length_);
+    local_lnn_distances_.push_back(nn_distance);
+
+    local_data_size_ += 1;
 
     return SUCCESS;
   };
@@ -73,19 +83,18 @@ class Filter {
 
   ID_TYPE get_id() const { return id_; };
   VALUE_TYPE get_node_summarization_pruning_frequency() const;
-  VALUE_TYPE get_nn_distance(ID_TYPE pos) const { return nn_distances_[pos]; };
-  VALUE_TYPE get_bsf_distance(ID_TYPE pos) const { return bsf_distances_[pos]; };
-  VALUE_TYPE get_pred_distance(ID_TYPE pos) const { return pred_distances_[pos]; };
+  VALUE_TYPE get_nn_distance(ID_TYPE pos) const { return global_lnn_distances_[pos]; };
+  VALUE_TYPE get_bsf_distance(ID_TYPE pos) const { return global_bsf_distances_[pos]; };
+  VALUE_TYPE get_pred_distance(ID_TYPE pos) const { return global_pred_distances_[pos]; };
+  std::tuple<VALUE_TYPE, VALUE_TYPE> get_global_lnn_mean_std() const {
+    return upcite::cal_mean_std(global_lnn_distances_.data(), global_lnn_distances_.size());
+  };
 
   VALUE_TYPE get_val_pruning_ratio() const;
 
-  VALUE_TYPE get_abs_error_interval() const {
-    return conformal_predictor_->get_alpha();
-  };
+  VALUE_TYPE get_abs_error_interval() const { return conformal_predictor_->get_alpha(); };
 
-  VALUE_TYPE get_abs_error_interval_by_pos(ID_TYPE pos) const {
-    return conformal_predictor_->get_alpha_by_pos(pos);
-  };
+  VALUE_TYPE get_abs_error_interval_by_pos(ID_TYPE pos) const { return conformal_predictor_->get_alpha_by_pos(pos); };
   RESPONSE set_abs_error_interval_by_pos(ID_TYPE pos) {
     return conformal_predictor_->set_alpha_by_pos(pos);
   };
@@ -105,10 +114,13 @@ class Filter {
 
   ID_TYPE id_;
 
+  bool is_trained_;
   bool is_active_;
+
   std::reference_wrapper<MODEL_SETTING> model_setting_ref_;
   // for filter loading only
   MODEL_SETTING model_setting_;
+
   // torch::save only takes shared_ptr
   std::shared_ptr<FilterCore> model_;
   std::unique_ptr<ConformalRegressor> conformal_predictor_;
@@ -117,18 +129,22 @@ class Filter {
   // TODO support different device for training and inference
   std::unique_ptr<torch::Device> device_;
 
-  bool is_trained_;
-  bool is_distances_preprocessed_, is_distances_logged;
-  ID_TYPE train_size_;
+  ID_TYPE global_data_size_, local_data_size_;
 
-  std::reference_wrapper<torch::Tensor> shared_train_queries_;
-  std::vector<VALUE_TYPE> bsf_distances_;
-  std::vector<VALUE_TYPE> nn_distances_;
+  std::reference_wrapper<torch::Tensor> global_queries_;
+  std::vector<VALUE_TYPE> global_bsf_distances_;
+  std::vector<VALUE_TYPE> global_lnn_distances_;
 
+  std::vector<VALUE_TYPE> local_queries_;
+  std::vector<VALUE_TYPE> local_lnn_distances_;
+
+  // currently not being used
   std::vector<VALUE_TYPE> lb_distances_; // lower bounds
   std::vector<VALUE_TYPE> ub_distances_; // upper bounds
 
-  std::vector<VALUE_TYPE> pred_distances_;
+  std::vector<VALUE_TYPE> global_pred_distances_;
+
+  bool is_distances_preprocessed_, is_distances_logged;
 };
 
 }

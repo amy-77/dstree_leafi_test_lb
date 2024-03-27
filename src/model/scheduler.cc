@@ -12,6 +12,7 @@
 namespace constant = upcite::constant;
 
 upcite::optim::ReduceLROnPlateau::ReduceLROnPlateau(torch::optim::Optimizer &optimizer,
+                                                    ID_TYPE initial_cooldown_epochs,
                                                     upcite::optim::METRICS_MODE mode,
                                                     double factor,
                                                     ID_TYPE patience,
@@ -21,6 +22,7 @@ upcite::optim::ReduceLROnPlateau::ReduceLROnPlateau(torch::optim::Optimizer &opt
                                                     double min_lr,
                                                     double eps) :
     torch::optim::LRScheduler(optimizer),
+    initial_cooldown_(initial_cooldown_epochs),
     mode_(mode),
     factor_(factor),
     patience_(patience),
@@ -45,47 +47,60 @@ upcite::optim::ReduceLROnPlateau::ReduceLROnPlateau(torch::optim::Optimizer &opt
   num_bad_epochs_ = 0;
 }
 
-RESPONSE upcite::optim::ReduceLROnPlateau::check_step(VALUE_TYPE metrics, ID_TYPE epoch) {
+upcite::optim::LR_RETURN_CODE upcite::optim::ReduceLROnPlateau::check_step(VALUE_TYPE metrics, ID_TYPE epoch) {
+  LR_RETURN_CODE return_code = SAME;
   VALUE_TYPE current = metrics;
 
   if (epoch < 0) {
     epoch = last_epoch_ + 1;
   }
 
-  if (is_better(current, best_)) {
-    best_ = current;
-    num_bad_epochs_ = 0;
+  if (epoch < initial_cooldown_) {
+    if (is_better(current, best_)) {
+      best_ = current;
+    }
   } else {
-    num_bad_epochs_ += 1;
-  }
+    if (is_better(current, best_)) {
+      best_ = current;
+      num_bad_epochs_ = 0;
+    } else {
+      num_bad_epochs_ += 1;
+    }
 
-  if (in_cooldown()) {
-    cooldown_counter_ -= 1;
-    num_bad_epochs_ = 0;
-  }
+    if (in_cooldown()) {
+      cooldown_counter_ -= 1;
+      num_bad_epochs_ = 0;
+    }
 
-  if (num_bad_epochs_ > patience_) {
+    if (num_bad_epochs_ > patience_) {
+      if (get_current_lrs()[0] <= min_lrs[0]) {
+        return_code = EARLY_STOP;
+      } else {
 #ifdef DEBUG
 #ifndef DEBUGGED
-    double old_lr = get_current_lrs()[0];
+        double old_lr = get_current_lrs()[0];
 #endif
 #endif
 
-    step();
+        step();
 
 #ifdef DEBUG
 #ifndef DEBUGGED
-    double new_lr = get_current_lrs()[0];
+        double new_lr = get_current_lrs()[0];
     spdlog::debug("filter lr = {:f} -> {:f}", old_lr, new_lr);
 #endif
 #endif
 
-    cooldown_counter_ = cooldown_;
-    num_bad_epochs_ = 0;
+        cooldown_counter_ = cooldown_;
+        num_bad_epochs_ = 0;
+
+        return_code = REDUCED;
+      }
+    }
   }
 
   last_epoch_ = epoch;
-  return SUCCESS;
+  return return_code;
 }
 
 std::vector<double> upcite::optim::ReduceLROnPlateau::get_lrs() {

@@ -595,6 +595,9 @@ RESPONSE dstree::Index::filter_train_mthread() {
 }
 
 RESPONSE dstree::Index::train(bool is_retrain) {
+  // local query generation is called after collecting global results
+  dstree::Synthesizer query_synthesizer(config_, nleaf_);
+
   if (!fs::exists(config_.get().filter_query_filepath_)) {
     assert(!is_retrain); // not applicable to loaded filters
 
@@ -604,6 +607,7 @@ RESPONSE dstree::Index::train(bool is_retrain) {
     }
 
     ID_TYPE query_set_nbytes = -1;
+
     if (config_.get().filter_num_synthetic_query_per_filter_ > 0) {
       ID_TYPE num_synthetic_queries = root_->get_num_synthetic_queries(allocator_->get_node_size_threshold());
 
@@ -616,14 +620,14 @@ RESPONSE dstree::Index::train(bool is_retrain) {
       assert(num_generated_queries == num_synthetic_queries);
 
       config_.get().filter_train_nexample_ = num_synthetic_queries;
+
+      spdlog::info("filter generated {:d} synthetic train queries", config_.get().filter_train_nexample_);
     } else if (config_.get().filter_train_num_global_example_ > 0
         && config_.get().filter_train_num_local_example_ > 0) {
       // generate global queries
       query_set_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
           * config_.get().series_length_ * config_.get().filter_train_num_global_example_;
       filter_train_query_ptr_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), query_set_nbytes));
-
-      dstree::Synthesizer query_synthesizer(config_, nleaf_);
 
       ID_TYPE leaf_size_threshold = config_.get().filter_default_node_size_threshold_;
 
@@ -647,12 +651,14 @@ RESPONSE dstree::Index::train(bool is_retrain) {
       RESPONSE return_code = query_synthesizer.generate_global_data(filter_train_query_ptr_);
       config_.get().filter_train_nexample_ = config_.get().filter_train_num_global_example_;
 
-      // generate and *search* local queries
-      return_code = static_cast<RESPONSE>(return_code | query_synthesizer.generate_local_data());
       if (return_code == FAILURE) {
-        spdlog::error("failed to generate global and local queries");
+        spdlog::error("failed to generate global queries");
         return FAILURE;
       }
+
+      spdlog::info("filter generated {:d} synthetic global queries", config_.get().filter_train_nexample_);
+
+      // local query generation is called after collecting global results
     } else {
       spdlog::error("erroneous config for query generation");
       return FAILURE;
@@ -663,8 +669,6 @@ RESPONSE dstree::Index::train(bool is_retrain) {
     std::ofstream query_fout(filter_query_filepath, std::ios::binary | std::ios_base::app);
     query_fout.write(reinterpret_cast<char *>(filter_train_query_ptr_), query_set_nbytes);
     query_fout.close();
-
-    spdlog::info("filter train generated {:d} filter train queries", config_.get().filter_train_nexample_);
   } else {
     auto query_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE))
         * config_.get().series_length_ * config_.get().filter_train_nexample_;
@@ -725,6 +729,18 @@ RESPONSE dstree::Index::train(bool is_retrain) {
       filter_collect_mthread();
     } else {
       filter_collect();
+    }
+
+    if (config_.get().filter_train_num_local_example_ > 0) {
+      // generate and *search* local queries
+      RESPONSE return_code = static_cast<RESPONSE>(return_code | query_synthesizer.generate_local_data());
+
+      if (return_code == FAILURE) {
+        spdlog::error("failed to generate local queries");
+        return FAILURE;
+      }
+
+      spdlog::info("filter generated {:d} synthetic local queries", config_.get().filter_train_num_local_example_);
     }
   }
 

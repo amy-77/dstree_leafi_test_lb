@@ -42,8 +42,6 @@ dstree::Filter::Filter(dstree::Config &config,
     global_data_size_(0),
     local_data_size_(0),
     model_setting_ref_(MODEL_SETTING_PLACEHOLDER_REF) {
-//  torch::Device device = torch::Device(c10::DeviceType::Lazy);
-
   if (config.filter_train_is_gpu_) {
     // TODO support multiple devices
     device_ = std::make_unique<torch::Device>(torch::kCUDA,
@@ -55,7 +53,7 @@ dstree::Filter::Filter(dstree::Config &config,
   // delayed until allocated (either in trial or activation)
   model_ = nullptr;
 
-  if (!config.to_load_index_) {
+  if (!config.to_load_index_ && config.filter_train_nexample_ > 0) {
     global_bsf_distances_.reserve(config.filter_train_nexample_);
     global_lnn_distances_.reserve(config.filter_train_nexample_);
     lb_distances_.reserve(config.filter_train_nexample_);
@@ -70,9 +68,28 @@ dstree::Filter::Filter(dstree::Config &config,
 }
 
 RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_runtime_stat) {
-  ID_TYPE num_global_train_examples = global_data_size_ * config_.get().filter_train_val_split_;
-  ID_TYPE num_global_valid_examples = global_data_size_ - num_global_train_examples;
-  ID_TYPE num_conformal_examples = num_global_valid_examples;
+  ID_TYPE num_conformal_examples;
+
+  if (!collect_runtime_stat) {
+    ID_TYPE num_global_train_examples = global_data_size_ * config_.get().filter_train_val_split_;
+    ID_TYPE num_global_valid_examples = global_data_size_ - num_global_train_examples;
+
+    num_conformal_examples = num_global_valid_examples;
+  } else {
+    if (config_.get().filter_train_num_global_example_ > 0 && config_.get().filter_train_num_local_example_) {
+      ID_TYPE num_global_train_examples = config_.get().filter_train_num_global_example_ * config_.get().filter_train_val_split_;
+      ID_TYPE num_global_valid_examples = config_.get().filter_train_num_global_example_ - num_global_train_examples;
+
+      num_conformal_examples = num_global_valid_examples;
+    } else if (config_.get().filter_train_nexample_ > 0) {
+      ID_TYPE num_global_train_examples = config_.get().filter_train_nexample_ * config_.get().filter_train_val_split_;
+      ID_TYPE num_global_valid_examples = config_.get().filter_train_nexample_ - num_global_train_examples;
+
+      num_conformal_examples = num_global_valid_examples;
+    } else {
+      num_conformal_examples = 8192;
+    }
+  }
 
   auto residuals = upcite::make_reserved<ERROR_TYPE>(num_conformal_examples + 2);
 
@@ -81,10 +98,14 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_run
     std::mt19937 e2(rd());
     std::uniform_real_distribution<> dist(0, 1);
 
+    // include two sentry diffs
     for (ID_TYPE i = 0; i < num_conformal_examples + 2; ++i) {
       residuals.push_back(dist(e2));
     }
   } else {
+    ID_TYPE num_global_train_examples = global_data_size_ * config_.get().filter_train_val_split_;
+    ID_TYPE num_global_valid_examples = global_data_size_ - num_global_train_examples;
+
     VALUE_TYPE max_diff = constant::MIN_VALUE, mean_diff = 0, std_diff = 0;
     ID_TYPE num_diff = 0;
 
@@ -164,6 +185,8 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_run
       for (ID_TYPE i = 0; i < num_conformal_examples + 2; ++i) {
         recalls.push_back(dist(e2));
       }
+
+      std::sort(recalls.begin(), recalls.end()); //non-decreasing
 
       fit_filter_conformal_spline(recalls);
     }
@@ -258,6 +281,9 @@ RESPONSE dstree::Filter::train(bool is_trial) {
   torch::Tensor train_targets, valid_targets;
 
   if (local_data_size_ > 0) {
+    assert(global_data_size_ == config_.get().filter_train_num_global_example_);
+    assert(local_data_size_ == config_.get().filter_train_num_local_example_);
+
     ID_TYPE num_global_train_examples = global_data_size_ * config_.get().filter_train_val_split_;
     ID_TYPE num_local_train_examples = local_data_size_ * config_.get().filter_train_val_split_;
 
@@ -303,6 +329,8 @@ RESPONSE dstree::Filter::train(bool is_trial) {
     assert(train_data.size(0) == num_train_examples && train_targets.size(0) == num_train_examples);
     assert(valid_data.size(0) == num_train_examples && valid_targets.size(0) == num_train_examples);
   } else {
+    assert(global_data_size_ == config_.get().filter_train_nexample_);
+
     train_data = global_queries_.get().index({torch::indexing::Slice(0, num_train_examples)}).clone();
     train_targets = torch::from_blob(global_lnn_distances_.data(),
                                      num_train_examples,
@@ -327,6 +355,17 @@ RESPONSE dstree::Filter::train(bool is_trial) {
   ID_TYPE num_conformal_examples = num_valid_examples;
   torch::Tensor conformal_data = valid_data;
   torch::Tensor conformal_targets = valid_targets;
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+  spdlog::debug("train thread {:d} node {:d} model {:d} n_train {:d} n_valid {:d} n_conformal {:d} n_batch {:d}",
+                      trial_cache.thread_id_,
+                      trial_sample_i,
+                      model_i,
+                      trial_cache.filter_pruning_ratios_ref_.get()[trial_cache.trial_nnode_ * model_i + trial_sample_i]
+        );
+#endif
+#endif
 
   // TODO instantiate the model according to the assigned model_setting_
   model_ = std::make_shared<dstree::MLPFilter>(config_.get().series_length_,
@@ -447,7 +486,7 @@ RESPONSE dstree::Filter::train(bool is_trial) {
   model_->eval();
 
   auto prediction = model_->forward(global_queries_).detach().cpu();
-  VALUE_TYPE *predictions_array = prediction.detach().cpu().contiguous().data_ptr<VALUE_TYPE>();
+  auto *predictions_array = prediction.detach().cpu().contiguous().data_ptr<VALUE_TYPE>();
 
   global_pred_distances_.insert(global_pred_distances_.end(), predictions_array, predictions_array + global_data_size_);
 
@@ -508,7 +547,7 @@ RESPONSE dstree::Filter::collect_running_info(MODEL_SETTING &model_setting) {
   auto start = std::chrono::high_resolution_clock::now();
 
   for (ID_TYPE trial_i = 0; trial_i < config_.get().filter_trial_iterations_; ++trial_i) {
-    VALUE_TYPE pred = model_->forward(trial_query).item<VALUE_TYPE>();
+    auto pred = model_->forward(trial_query).item<VALUE_TYPE>();
 
     if (conformal_predictor_ != nullptr) {
       pred = conformal_predictor_->predict(pred).left_bound_;

@@ -259,7 +259,7 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("filter_trial_iterations",
        po::value<ID_TYPE>(&filter_trial_iterations_)->default_value(20000),
        "Filter no. queries for model speed test (default: 20000)")
-      ("filter_trial_filter_preselection_size_threshold",
+      ("filter_default_node_size_threshold",
        po::value<ID_TYPE>(&filter_default_node_size_threshold_)->default_value(8),
        "Filter size threshold to run trials (default: 8)")
       ("filter_trial_nnode",
@@ -357,7 +357,13 @@ dstree::Config::Config(int argc, char *argv[]) :
     }
 
     if (filter_train_batchsize_ < 0) {
-      filter_train_batchsize_ = filter_train_nexample_;
+      if (filter_train_nexample_ > 0) {
+        filter_train_batchsize_ = filter_train_nexample_;
+      } else if (filter_train_num_global_example_ > 0 && filter_train_num_local_example_ > 0) {
+        filter_train_batchsize_ = filter_train_num_global_example_ + filter_train_num_local_example_;
+      } else {
+        filter_train_batchsize_ = 1024;
+      }
     }
 
     if (vm.count("filter_infer_is_gpu") < 1) {
@@ -655,7 +661,7 @@ void dstree::Config::log() {
   spdlog::info("filter_trial_confidence_level = {:.6f}", filter_trial_confidence_level_);
   spdlog::info("filter_trial_iterations = {:d}", filter_trial_iterations_);
   spdlog::info("filter_trial_nnode = {:d}", filter_trial_nnode_);
-  spdlog::info("filter_trial_filter_preselection_size_threshold_ = {:d}", filter_default_node_size_threshold_);
+  spdlog::info("filter_default_node_size_threshold = {:d}", filter_default_node_size_threshold_);
   spdlog::info("allocator_cpu_trial_iterations = {:d}", allocator_cpu_trial_iterations_);
 
   spdlog::info("filter_retrain = {:b}", filter_retrain_);

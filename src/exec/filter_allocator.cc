@@ -39,7 +39,8 @@ dstree::Allocator::Allocator(dstree::Config &config,
 
   node_size_threshold_ = constant::MAX_ID;
   for (ID_TYPE candidate_model_i = 0; candidate_model_i < candidate_model_settings_.size(); ++candidate_model_i) {
-    ID_TYPE current_node_size_threshold = candidate_model_settings_[candidate_model_i].gpu_ms_per_query / cpu_ms_per_series_;
+    ID_TYPE current_node_size_threshold =
+        candidate_model_settings_[candidate_model_i].gpu_ms_per_query / cpu_ms_per_series_;
     if (current_node_size_threshold < node_size_threshold_) {
       node_size_threshold_ = current_node_size_threshold;
     }
@@ -513,15 +514,31 @@ RESPONSE dstree::Allocator::assign() {
     if (candidate_model_settings_.size() == 1) {
       std::sort(filter_infos_.begin(), filter_infos_.end(), dstree::compDecreFilterScore);
 
-      for (auto &filter_info : filter_infos_) {
-        if (allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb > available_gpu_memory_mb_
-            || filter_info.score <= 0) {
-          break;
-        }
+      if (filter_infos_[0].score <= 0) {
+        spdlog::error("allocator gain-based allocation failed; revert to size-based allocation");
 
-        if (filter_info.node_.get().activate_filter(filter_info.model_setting) == SUCCESS) {
-          allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
-          allocated_filters_count += 1;
+        for (auto &filter_info : filter_infos_) {
+          if (filter_info.node_.get().get_size() > config_.get().filter_node_size_threshold_
+              && allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb <= available_gpu_memory_mb_) {
+            if (filter_info.node_.get().activate_filter(candidate_model_settings_[0]) == SUCCESS) {
+              allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
+              allocated_filters_count += 1;
+            }
+          } else {
+            break;
+          }
+        }
+      } else {
+        for (auto &filter_info : filter_infos_) {
+          if (allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb > available_gpu_memory_mb_
+              || filter_info.score <= 0) {
+            break;
+          }
+
+          if (filter_info.node_.get().activate_filter(filter_info.model_setting) == SUCCESS) {
+            allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
+            allocated_filters_count += 1;
+          }
         }
       }
     } else {
@@ -540,11 +557,14 @@ RESPONSE dstree::Allocator::assign() {
       }
 
       for (auto &filter_info : filter_infos_) {
-        if (filter_info.node_.get().get_size() > config_.get().filter_node_size_threshold_) {
+        if (filter_info.node_.get().get_size() > config_.get().filter_node_size_threshold_
+            && allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb <= available_gpu_memory_mb_) {
           if (filter_info.node_.get().activate_filter(candidate_model_settings_[0]) == SUCCESS) {
             allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
             allocated_filters_count += 1;
           }
+        } else {
+          break;
         }
       }
     }
@@ -707,12 +727,16 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
       for (ID_TYPE query_i = 0; query_i < num_conformal_examples; ++query_i) {
         std::reference_wrapper<dstree::Node> target_node = filter_infos_[nn_filter_ids[query_i]].node_;
 
-        VALUE_TYPE abs_error_interval = target_node.get().get_filter_abs_error_interval_by_pos(sorted_error_i);
+        if (target_node.get().has_active_filter()) {
+          VALUE_TYPE abs_error_interval = target_node.get().get_filter_abs_error_interval_by_pos(sorted_error_i);
 
-        VALUE_TYPE bsf_distance = target_node.get().get_filter_bsf_distance(num_train_examples + query_i);
-        VALUE_TYPE pred_distance = target_node.get().get_filter_pred_distance(num_train_examples + query_i);
+          VALUE_TYPE bsf_distance = target_node.get().get_filter_bsf_distance(num_train_examples + query_i);
+          VALUE_TYPE pred_distance = target_node.get().get_filter_pred_distance(num_train_examples + query_i);
 
-        if (pred_distance - abs_error_interval <= bsf_distance) {
+          if (pred_distance - abs_error_interval <= bsf_distance) {
+            hit_count += 1;
+          }
+        } else {
           hit_count += 1;
         }
       }

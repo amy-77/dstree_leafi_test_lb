@@ -155,7 +155,7 @@ void generation_thread_F(LocalGenerationCache &generation_cache) {
         // TODO check and prune if the generated series falling in the same leaf node
         // does it work for the EAPCA envelop of dstree?
 
-        VALUE_TYPE local_nn_distance = current_node.search(series_ptr, m256_fetch_cache);
+        VALUE_TYPE local_nn_distance = current_node.search(generated_series_ptr, m256_fetch_cache);
 
         if (local_nn_distance > max_legal_lnn_distance) {
           spdlog::error("thread {:d} node {:d} series {:d} +noise {:.3f} escaped the local neighbourhood ({:.3f} > {:.3f}); regenerate",

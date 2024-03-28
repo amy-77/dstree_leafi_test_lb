@@ -424,7 +424,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     }
 
     if (!fs::is_directory(index_dump_folderpath_)) {
-      fs::create_directory(index_dump_folderpath_);
+      fs::create_directories(index_dump_folderpath_);
     }
 
     if (!boost::algorithm::ends_with(index_dump_folderpath_, "/")) {

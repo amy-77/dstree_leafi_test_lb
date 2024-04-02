@@ -25,7 +25,37 @@ dstree::Allocator::Allocator(dstree::Config &config,
     is_recall_calculated_(false),
     node_size_threshold_(0) {
 
-  available_gpu_memory_mb_ = config.filter_max_gpu_memory_mb_;
+  if (config_.get().filter_infer_is_gpu_) {
+    if (torch::cuda::is_available()) {
+      cudaSetDevice(config_.get().filter_device_id_);
+
+      size_t gpu_free_bytes_, gpu_total_bytes_;
+      cuMemGetInfo(&gpu_free_bytes_, &gpu_total_bytes_);
+      VALUE_TYPE gpu_free_mb = static_cast<VALUE_TYPE>(gpu_free_bytes_) / 1024 / 1024;
+
+      if (gpu_free_mb < config.filter_max_gpu_memory_mb_) {
+        if (gpu_free_mb > 1) {
+          spdlog::error("allocator required {:.3f}mb is not available; down to all free {:.3f}mb",
+                        config.filter_max_gpu_memory_mb_, gpu_free_mb);
+
+          available_gpu_memory_mb_ = gpu_free_mb;
+        } else {
+          spdlog::error("allocator only {:.3f}mb gpu memory is free; exit", gpu_free_mb);
+          spdlog::shutdown();
+          exit(FAILURE);
+        }
+      } else {
+        spdlog::info("allocator requested {:.3f}mb; {:.3f}mb available",
+                     config.filter_max_gpu_memory_mb_, gpu_free_mb);
+
+        available_gpu_memory_mb_ = config.filter_max_gpu_memory_mb_;
+      }
+    } else {
+      spdlog::error("allocator gpu unavailable");
+      spdlog::shutdown();
+      exit(FAILURE);
+    }
+  }
 
   // TODO support model setting list
   candidate_model_settings_.emplace_back(config.filter_model_setting_str_);
@@ -35,6 +65,7 @@ dstree::Allocator::Allocator(dstree::Config &config,
   }
 
   measure_cpu();
+  assert(config_.get().filter_infer_is_gpu_);
   measure_gpu();
 
   node_size_threshold_ = constant::MAX_ID;
@@ -492,19 +523,6 @@ RESPONSE dstree::Allocator::evaluate() {
 }
 
 RESPONSE dstree::Allocator::assign() {
-  size_t gpu_free_bytes_, gpu_total_bytes_;
-  cuMemGetInfo(&gpu_free_bytes_, &gpu_total_bytes_);
-  VALUE_TYPE gpu_free_mb = static_cast<VALUE_TYPE>(gpu_free_bytes_) / 1024 / 1024;
-
-  if (gpu_free_mb < available_gpu_memory_mb_) {
-    spdlog::error("allocator required {:.3f}mb is not available; down to all free {:.3f}mb",
-                  available_gpu_memory_mb_, gpu_free_mb);
-    available_gpu_memory_mb_ = gpu_free_mb;
-  } else {
-    spdlog::info("allocator requested {:.3f}mb; {:.3f}mb available",
-                 available_gpu_memory_mb_, gpu_free_mb);
-  }
-
   VALUE_TYPE allocated_gpu_memory_mb = 0;
   ID_TYPE allocated_filters_count = 0;
 
@@ -579,19 +597,6 @@ RESPONSE dstree::Allocator::reassign() {
   if (candidate_model_settings_.size() != 1) {
     spdlog::error("allocator reallocation only supports single candidate");
     return FAILURE;
-  }
-
-  size_t gpu_free_bytes_, gpu_total_bytes_;
-  cuMemGetInfo(&gpu_free_bytes_, &gpu_total_bytes_);
-  VALUE_TYPE gpu_free_mb = static_cast<VALUE_TYPE>(gpu_free_bytes_) / 1024 / 1024;
-
-  if (gpu_free_mb < available_gpu_memory_mb_) {
-    spdlog::error("allocator required {:.3f}mb is not available; down to all free {:.3f}mb",
-                  available_gpu_memory_mb_, gpu_free_mb);
-    available_gpu_memory_mb_ = gpu_free_mb;
-  } else {
-    spdlog::info("allocator requested {:.3f}mb; {:.3f}mb available",
-                 available_gpu_memory_mb_, gpu_free_mb);
   }
 
   VALUE_TYPE allocated_gpu_memory_mb = 0;
@@ -698,7 +703,8 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
 
       for (ID_TYPE filter_i = 0; filter_i < filter_infos_.size(); ++filter_i) {
 //    if (filter_infos_[i].node_.get().has_active_filter()) { // nn should be searched from all nodes
-        VALUE_TYPE local_nn = filter_infos_[filter_i].node_.get().get_filter_nn_distance(num_train_examples + query_i);
+        VALUE_TYPE
+            local_nn = filter_infos_[filter_i].node_.get().get_filter_nn_distance(num_train_examples + query_i);
 
         if (local_nn < nn_distances[query_i]) {
           nn_distances[query_i] = local_nn;

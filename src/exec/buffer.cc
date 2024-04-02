@@ -33,6 +33,7 @@ dstree::Buffer::Buffer(bool is_on_disk,
     dump_filepath_(std::move(dump_filepath)),
     load_filepath_(std::move(load_filepath)),
     size_(0),
+    cached_size_(0),
     next_series_id_(0) {
   offsets_.reserve(16);
 }
@@ -44,21 +45,25 @@ dstree::Buffer::~Buffer() {
   }
 }
 
-const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
+const VALUE_TYPE *dstree::Buffer::get_first_series_ptr() {
+  next_series_id_ = 0;
+
   if (is_on_disk_) {
-    if (local_buffer_ == nullptr) {
+    if (cached_size_ == 0) {
+      assert(local_buffer_ == nullptr);
+
       ID_TYPE local_buffer_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * series_length_ * size_;
       local_buffer_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), local_buffer_nbytes));
 
       if (!fs::exists(load_filepath_)) {
-        spdlog::error("node file {:s} does not exist", load_filepath_);
+        spdlog::error("node data file {:s} does not exist", load_filepath_);
 
         return nullptr;
       }
 
       std::ifstream fin(load_filepath_, std::ios::in | std::ios::binary);
       if (!fin.good()) {
-        spdlog::error("node file {:s} cannot open", load_filepath_);
+        spdlog::error("node data file {:s} cannot open", load_filepath_);
 
         return nullptr;
       }
@@ -72,7 +77,28 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
       }
 
       fin.close();
+
+      cached_size_ = size_;
     }
+
+    return local_buffer_ + series_length_ * next_series_id_++;
+  } else {
+    return global_buffer_ + series_length_ * offsets_[next_series_id_++];
+  }
+
+  return nullptr;
+}
+
+const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
+#ifdef DEBUG
+#ifndef DEBUGGED
+  spdlog::debug("buffer is_disk {:b} next_i {:d} size_ {:d}/{:d}",
+                is_on_disk_, next_series_id_, size_, capacity_);
+#endif
+#endif
+
+  if (is_on_disk_) {
+    assert(local_buffer_ != nullptr && cached_size_ == size_);
 
     if (next_series_id_ < size_) {
       return local_buffer_ + series_length_ * next_series_id_++;
@@ -86,10 +112,11 @@ const VALUE_TYPE *dstree::Buffer::get_next_series_ptr() {
   return nullptr;
 }
 
-
 const VALUE_TYPE *dstree::Buffer::get_series_ptr_by_id(ID_TYPE node_series_id) {
   if (is_on_disk_) {
-    if (local_buffer_ == nullptr) {
+    if (cached_size_ == 0) {
+      assert(local_buffer_ == nullptr);
+
       ID_TYPE local_buffer_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * series_length_ * size_;
       local_buffer_ = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), local_buffer_nbytes));
 
@@ -115,6 +142,8 @@ const VALUE_TYPE *dstree::Buffer::get_series_ptr_by_id(ID_TYPE node_series_id) {
       }
 
       fin.close();
+
+      cached_size_ = size_;
     }
 
     if (node_series_id < size_) {
@@ -129,21 +158,31 @@ const VALUE_TYPE *dstree::Buffer::get_series_ptr_by_id(ID_TYPE node_series_id) {
   return nullptr;
 }
 
-RESPONSE dstree::Buffer::reset() {
-  if (local_buffer_ != nullptr) {
+RESPONSE dstree::Buffer::reset(bool reset_series_iter, bool free_buffer) {
+  if (local_buffer_ != nullptr && free_buffer) {
     std::free(local_buffer_);
     local_buffer_ = nullptr;
+    cached_size_ = 0;
   }
 
-  next_series_id_ = 0;
+  if (reset_series_iter) {
+    next_series_id_ = 0;
+  }
 
   return SUCCESS;
 }
 
 RESPONSE dstree::Buffer::insert(ID_TYPE offset) {
+  if (size_ >= capacity_) {
+    spdlog::error("node {:s} buffer nseries > capacity", fs::path(dump_filepath_).filename().string());
+    return FAILURE;
+  }
+
   // TODO explicitly managing ID_TYPE * resulted in unexpected change of values in the middle
   offsets_.push_back(offset);
+
   size_ += 1;
+  cached_size_ += 1;
 
 #ifdef DEBUG
 #ifndef DEBUGGED
@@ -158,30 +197,22 @@ RESPONSE dstree::Buffer::insert(ID_TYPE offset) {
 #endif
 #endif
 
-  if (size() > capacity_) {
-    // TODO
-    spdlog::error("{:s}: nseries > capacity", fs::path(dump_filepath_).filename().string());
-
-    return FAILURE;
-  }
-
   return SUCCESS;
 }
 
 RESPONSE dstree::Buffer::flush(VALUE_TYPE *load_buffer, VALUE_TYPE *flush_buffer, ID_TYPE series_length) {
-  if (size() > 0) {
+  if (cached_size_ > 0) {
     auto series_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * series_length;
 
-    for (ID_TYPE i = 0; i < size(); ++i) {
+    for (ID_TYPE i = 0; i < cached_size_; ++i) {
       std::memcpy(flush_buffer + series_length * i, load_buffer + series_length * offsets_[i], series_nbytes);
-
     }
 
     std::ofstream fout(dump_filepath_, std::ios::binary | std::ios_base::app);
-    fout.write(reinterpret_cast<char *>(flush_buffer), series_nbytes * size());
+    fout.write(reinterpret_cast<char *>(flush_buffer), series_nbytes * cached_size_);
     fout.close();
 
-    clean();
+    cached_size_ = 0;
   }
 
   return SUCCESS;
@@ -189,7 +220,9 @@ RESPONSE dstree::Buffer::flush(VALUE_TYPE *load_buffer, VALUE_TYPE *flush_buffer
 
 RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
   offsets_.clear();
+
   size_ = 0;
+  cached_size_ = 0;
 
   if (if_remove_cache) {
 //    offsets_.shrink_to_fit();
@@ -205,39 +238,29 @@ RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
   return SUCCESS;
 }
 
-RESPONSE dstree::Buffer::dump() const {
-  // TODO support dump in batches
+RESPONSE dstree::Buffer::dump(std::ofstream &node_ofs) const {
+  node_ofs.write(reinterpret_cast<const char *>(&size_), sizeof(ID_TYPE));
 
-  std::ofstream buffer_ofs(dump_filepath_, std::ios::out | std::ios::binary);
-//  assert(buffer_fos.is_open());
-
-  buffer_ofs.write(reinterpret_cast<const char *>(&size_), sizeof(ID_TYPE));
-  buffer_ofs.write(reinterpret_cast<const char *>(offsets_.data()), sizeof(ID_TYPE) * offsets_.size());
-
-//  assert(buffer_fos.good());
-  buffer_ofs.close();
+  if (size_ > 0) {
+    assert(offsets_.size() == size_);
+    node_ofs.write(reinterpret_cast<const char *>(offsets_.data()), sizeof(ID_TYPE) * offsets_.size());
+  }
 
   return SUCCESS;
 }
 
-RESPONSE dstree::Buffer::load(void *ifs_buf) {
-  // TODO support load in batches
-
-  std::ifstream buffer_ifs(load_filepath_, std::ios::in | std::ios::binary);
-//  assert(buffer_ifs.is_open());
-
+RESPONSE dstree::Buffer::load(std::ifstream &node_ifs, void *ifs_buf) {
   auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
 
   ID_TYPE read_nbytes = sizeof(ID_TYPE);
-  buffer_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   size_ = ifs_id_buf[0];
 
-  read_nbytes = sizeof(ID_TYPE) * size_;
-  buffer_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-  offsets_.insert(offsets_.begin(), ifs_id_buf, ifs_id_buf + size_);
-
-//  assert(buffer_ifs.good());
-  buffer_ifs.close();
+  if (size_ > 0) {
+    read_nbytes = sizeof(ID_TYPE) * size_;
+    node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+    offsets_.insert(offsets_.begin(), ifs_id_buf, ifs_id_buf + size_);
+  }
 
   return SUCCESS;
 }
@@ -291,11 +314,13 @@ dstree::BufferManager::~BufferManager() {
 
 dstree::Buffer &dstree::BufferManager::create_node_buffer(ID_TYPE node_id) {
   auto buffer_id = static_cast<ID_TYPE>(node_buffers_.size());
-  std::string buffer_filepath = config_.get().dump_data_folderpath_ + std::to_string(node_id) + config_.get().index_dump_file_postfix_;
+  std::string buffer_filepath =
+      config_.get().dump_data_folderpath_ + std::to_string(node_id) + config_.get().index_dump_file_postfix_;
 
   std::string load_filepath = buffer_filepath;
   if (config_.get().to_load_index_) {
-    load_filepath = config_.get().load_data_folderpath_ + std::to_string(node_id) + config_.get().index_dump_file_postfix_;
+    load_filepath =
+        config_.get().load_data_folderpath_ + std::to_string(node_id) + config_.get().index_dump_file_postfix_;
   }
 
   node_buffers_.emplace_back(std::make_unique<dstree::Buffer>(

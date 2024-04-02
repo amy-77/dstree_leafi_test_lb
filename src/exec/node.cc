@@ -299,6 +299,7 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
                                                           child_eapca_envelope));
   }
 
+  // TODO support index building in batch: flushed data and cached data should be combined
   for (ID_TYPE node_series_id = 0; node_series_id < buffer_.get().size(); ++node_series_id) {
     ID_TYPE series_batch_id = buffer_.get().get_offset(node_series_id);
 
@@ -329,8 +330,6 @@ RESPONSE dstree::Node::split(dstree::BufferManager &buffer_manager,
 //#endif
 #endif
 
-  // TODO load flushed series, calculate their EAPCA and insert into children nodes
-
   buffer_.get().clean(true);
   nseries_ = 0;
 
@@ -341,20 +340,28 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
                               dstree::Answers &answer,
                               ID_TYPE &visited_node_counter,
                               ID_TYPE &visited_series_counter) const {
-  const VALUE_TYPE *db_series_ptr = buffer_.get().get_next_series_ptr();
+  const VALUE_TYPE *db_series_ptr = buffer_.get().get_first_series_ptr();
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+  if (db_series_ptr == nullptr) {
+    spdlog::debug("query {:d} node {:d} ({:d}) series null ptr",
+                  answer.query_id_, id_, visited_node_counter);
+  }
+
+  ID_TYPE series_i = 0;
+#endif
+#endif
 
   while (db_series_ptr != nullptr) {
     VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_.get().series_length_);
 
 #ifdef DEBUG
 #ifndef DEBUGGED
-    MALAT_LOG(logger_->logger, trivial::debug) << boost::format(
-          "query %d distance %.3f is_bsf %d bsf.size %d bsf.top %.3f")
-          % answer->query_id_
-          % distance
-          % answer->is_bsf(distance)
-          % answer->bsf_distances_.size()
-          % answer->bsf_distances_.top();
+    spdlog::debug("query {:d} node {:d} ({:d}) series {:d}/{:d} dist {:.3f} bsf {:.3f}",
+                  answer.query_id_, id_, visited_node_counter, series_i, nseries_,
+                  distance, answer.get_bsf());
+    series_i += 1;
 #endif
 #endif
 
@@ -370,7 +377,7 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
     db_series_ptr = buffer_.get().get_next_series_ptr();
   }
 
-  buffer_.get().reset();
+  buffer_.get().reset(true, true);
 
   visited_node_counter += 1;
 
@@ -380,7 +387,7 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
                                 VALUE_TYPE *m256_fetch_cache,
                                 VALUE_TYPE bsf_distance) const {
-  const VALUE_TYPE *db_series_ptr = buffer_.get().get_next_series_ptr();
+  const VALUE_TYPE *db_series_ptr = buffer_.get().get_first_series_ptr();
   VALUE_TYPE local_bsf = constant::MAX_VALUE;
 
   while (db_series_ptr != nullptr) {
@@ -402,7 +409,7 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
     db_series_ptr = buffer_.get().get_next_series_ptr();
   }
 
-  buffer_.get().reset();
+  buffer_.get().reset(true, true);
 
   return local_bsf;
 }
@@ -410,7 +417,7 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 VALUE_TYPE dstree::Node::search_mt(const VALUE_TYPE *query_series_ptr,
                                    Answers &answer,
                                    pthread_mutex_t *answer_mutex) const {
-  const VALUE_TYPE *db_series_ptr = buffer_.get().get_next_series_ptr();
+  const VALUE_TYPE *db_series_ptr = buffer_.get().get_first_series_ptr();
   VALUE_TYPE local_bsf = constant::MAX_VALUE;
 
   pthread_mutex_lock(answer_mutex);
@@ -440,7 +447,7 @@ VALUE_TYPE dstree::Node::search_mt(const VALUE_TYPE *query_series_ptr,
     db_series_ptr = buffer_.get().get_next_series_ptr();
   }
 
-  buffer_.get().reset();
+  buffer_.get().reset(true, true);
 
   return local_bsf;
 }
@@ -501,9 +508,7 @@ RESPONSE dstree::Node::dump(void *ofs_buf) const {
   }
   node_ofs.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
 
-  if (buffer_.get().size() > 0) {
-    buffer_.get().dump();
-  }
+  buffer_.get().dump(node_ofs);
 
 //  assert(node_fos.good());
   node_ofs.close();
@@ -590,7 +595,7 @@ RESPONSE dstree::Node::load(void *ifs_buf,
   ID_TYPE has_buffer = ifs_id_buf[0];
 
   if (has_buffer > 0) {
-    status = buffer_.get().load(ifs_buf);
+    status = buffer_.get().load(node_ifs, ifs_buf);
 
     if (status == FAILURE) {
       spdlog::error("node {:d} buffer loading failed", id_);
@@ -617,11 +622,15 @@ RESPONSE dstree::Node::load(void *ifs_buf,
     spdlog::info("subtree {:d} loaded", id_);
   } else {
     if (nseries_ == buffer_.get().size()) {
-      spdlog::info("leaf {:d} loaded {:d}", id_, nseries_);
+      if (config_.get().on_disk_) {
+        spdlog::info("loaded leaf {:d}, {:d} series on disk", id_, nseries_);
+      } else {
+        spdlog::info("loaded leaf {:d}, {:d} series in memory", id_, nseries_);
+      }
 
       nleaf += 1;
     } else {
-      spdlog::error("leaf {:d} loaded {:d}; expected {:d}", id_, buffer_.get().size(), nseries_);
+      spdlog::error("loaded leaf {:d}, but {:d} series in buffer; expected {:d}", id_, buffer_.get().size(), nseries_);
       return FAILURE;
     }
   }
@@ -672,7 +681,7 @@ RESPONSE dstree::Node::synthesize_query(VALUE_TYPE *generated_queries,
         memcpy(generated_series, sample_series, sizeof(VALUE_TYPE) * config_.get().series_length_);
 
         for (ID_TYPE value_i = 0; value_i < config_.get().series_length_; ++value_i) {
-          generated_series[value_i] += (VALUE_TYPE ) gsl_ran_gaussian(r, config_.get().filter_noise_level_);
+          generated_series[value_i] += (VALUE_TYPE) gsl_ran_gaussian(r, config_.get().filter_noise_level_);
         }
 
         RESPONSE return_code = upcite::znormalize(generated_series, config_.get().series_length_);

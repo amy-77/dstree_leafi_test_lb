@@ -43,7 +43,7 @@ int main(int argc, char *argv[]) {
     status = index->build();
   }
 
-  if (config->on_disk_ || config->to_dump_index_) {
+  if (config->to_dump_index_) {
     status = static_cast<RESPONSE>(status | index->dump());
   }
 

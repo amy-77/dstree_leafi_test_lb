@@ -39,19 +39,21 @@ class Buffer {
 
   ID_TYPE get_offset(ID_TYPE node_series_id) const { return offsets_[node_series_id]; }
 
+  const VALUE_TYPE *get_first_series_ptr();
+
   const VALUE_TYPE *get_next_series_ptr();
   const VALUE_TYPE *get_series_ptr_by_id(ID_TYPE node_series_id);
-  RESPONSE reset();
+  RESPONSE reset(bool reset_series_iter = true, bool free_buffer = true);
 
   bool is_full() const { return capacity_ > 0 && offsets_.size() == capacity_; }
   ID_TYPE size() const { return size_; }
 
-  RESPONSE dump() const;
-  RESPONSE load(void *ifs_buf);
+  RESPONSE dump(std::ofstream &node_ofs) const;
+  RESPONSE load(std::ifstream &node_ifs, void *ifs_buf);
 
  private:
   bool is_on_disk_;
-  ID_TYPE capacity_, size_;
+  ID_TYPE capacity_, size_, cached_size_;
   ID_TYPE series_length_;
 
   std::vector<ID_TYPE> offsets_;
@@ -62,7 +64,6 @@ class Buffer {
   std::string load_filepath_; // with node.id_
   std::string dump_filepath_;
 };
-
 
 extern Buffer BUFFER_PLACEHOLDER;
 extern std::reference_wrapper<Buffer> BUFFER_PLACEHOLDER_REF;

@@ -852,7 +852,9 @@ RESPONSE dstree::Index::load() {
   std::free(ifs_buf);
 
   // TODO in-memory only; supports on-disk
-  buffer_manager_->load_batch();
+  if (!config_.get().on_disk_) {
+    buffer_manager_->load_batch();
+  }
 
   leaf_min_heap_ = std::priority_queue<NODE_DISTNCE, std::vector<NODE_DISTNCE>, CompareDecrNodeDist>(
       CompareDecrNodeDist(), make_reserved<dstree::NODE_DISTNCE>(nleaf_));
@@ -957,7 +959,8 @@ RESPONSE dstree::Index::search() {
 
   //
   // get confidence intervals based on the required recall, during search
-  if (config_.get().filter_is_conformal_ && config_.get().filter_conformal_adjust_confidence_by_recall_) {
+  if (config_.get().require_neurofilter_ && config_.get().filter_is_conformal_
+      && config_.get().filter_conformal_adjust_confidence_by_recall_) {
     allocator_.get()->set_confidence_from_recall();
   }
 
@@ -979,8 +982,8 @@ RESPONSE dstree::Index::search() {
   return SUCCESS;
 }
 
-RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr) {
-  VALUE_TYPE *route_ptr = series_ptr;
+RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TYPE *sketch_ptr) {
+  VALUE_TYPE *route_ptr = query_ptr;
   if (config_.get().is_sketch_provided_) {
     route_ptr = sketch_ptr;
   }
@@ -988,7 +991,7 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
   auto answers = std::make_shared<dstree::Answers>(config_.get().n_nearest_neighbor_, query_id);
 
   if (config_.get().require_neurofilter_) {
-    filter_query_tsr_ = torch::from_blob(series_ptr,
+    filter_query_tsr_ = torch::from_blob(query_ptr,
                                          {1, config_.get().series_length_},
                                          torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
     filter_query_tsr_ = filter_query_tsr_.to(*device_);
@@ -1000,10 +1003,19 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
     resident_node = resident_node.get().route(route_ptr);
   }
 
+#ifdef DEBUG
+//#ifndef DEBUGGED
+  spdlog::debug("query {:d} resident node {:d} size {:d}",
+                answers.get()->query_id_,
+                resident_node.get().get_id(),
+                resident_node.get().get_size());
+//#endif
+#endif
+
   ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
   ID_TYPE nfpruned_node_counter = 0, nfpruned_series_counter = 0;
 
-  resident_node.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+  resident_node.get().search(query_ptr, *answers, visited_node_counter, visited_series_counter);
 
   if (config_.get().is_exact_search_) {
     leaf_min_heap_.push(std::make_tuple(std::ref(*root_), root_->cal_lower_bound_EDsquare(route_ptr)));
@@ -1015,6 +1027,16 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
     while (!leaf_min_heap_.empty()) {
       std::tie(node_to_visit, node2visit_lbdistance) = leaf_min_heap_.top();
       leaf_min_heap_.pop();
+
+#ifdef DEBUG
+#ifndef DEBUGGED
+      spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f}",
+                    answers.get()->query_id_,
+                    node_to_visit.get().get_id(),
+                    node2visit_lbdistance,
+                    answers->get_bsf());
+#endif
+#endif
 
       if (node_to_visit.get().is_leaf()) {
         if (visited_node_counter < config_.get().search_max_nnode_ &&
@@ -1039,11 +1061,11 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_T
                   nfpruned_node_counter += 1;
                   nfpruned_series_counter += node_to_visit.get().get_size();
                 } else {
-                  node_to_visit.get().search(series_ptr, *answers, visited_node_counter,
+                  node_to_visit.get().search(query_ptr, *answers, visited_node_counter,
                                              visited_series_counter);
                 }
               } else {
-                node_to_visit.get().search(series_ptr, *answers, visited_node_counter,
+                node_to_visit.get().search(query_ptr, *answers, visited_node_counter,
                                            visited_series_counter);
               }
             }

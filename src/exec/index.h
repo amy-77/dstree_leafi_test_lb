@@ -47,7 +47,7 @@ class Index {
   RESPONSE load();
 
   RESPONSE search();
-  RESPONSE search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr = nullptr);
+  RESPONSE search(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TYPE *sketch_ptr = nullptr);
   RESPONSE search_navigated(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr = nullptr);
 
  private:

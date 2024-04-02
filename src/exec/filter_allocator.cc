@@ -9,7 +9,8 @@
 #include <immintrin.h>
 
 #include <spdlog/spdlog.h>
-#include <cuda.h>
+#include <torch/torch.h>
+#include <cuda_runtime_api.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 
@@ -30,7 +31,7 @@ dstree::Allocator::Allocator(dstree::Config &config,
       cudaSetDevice(config_.get().filter_device_id_);
 
       size_t gpu_free_bytes_, gpu_total_bytes_;
-      cuMemGetInfo(&gpu_free_bytes_, &gpu_total_bytes_);
+      cudaMemGetInfo(&gpu_free_bytes_, &gpu_total_bytes_);
       VALUE_TYPE gpu_free_mb = static_cast<VALUE_TYPE>(gpu_free_bytes_) / 1024 / 1024;
 
       if (gpu_free_mb < config.filter_max_gpu_memory_mb_) {

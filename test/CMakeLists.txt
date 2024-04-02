@@ -47,33 +47,50 @@ cmake_minimum_required(VERSION 3.16)
 ####################
 # speed test for cpu/gpu
 ####################
-find_package(Torch REQUIRED)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
-
-set(TEST_CPU test_cpu)
-add_executable(${TEST_CPU} test_model_cpu.cc)
-
-target_link_libraries(${TEST_CPU} ${TORCH_LIBRARIES})
-set_property(TARGET ${TEST_CPU} PROPERTY CXX_STANDARD 14)
-#target_compile_features(${TEST_CPU} PRIVATE cxx_std_14)
-#add_compile_options(-O0 -g -D_GNU_SOURCE -D_GLIBCXX_DEBUG)
-#add_compile_options(-O0)
-
-install(TARGETS ${TEST_CPU} DESTINATION ${CMAKE_SOURCE_DIR}/bin)
+#find_package(Torch REQUIRED)
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+#
+#set(TEST_CPU test_cpu)
+#add_executable(${TEST_CPU} test_model_cpu.cc)
+#
+#target_link_libraries(${TEST_CPU} ${TORCH_LIBRARIES})
+#set_property(TARGET ${TEST_CPU} PROPERTY CXX_STANDARD 14)
+##target_compile_features(${TEST_CPU} PRIVATE cxx_std_14)
+##add_compile_options(-O0 -g -D_GNU_SOURCE -D_GLIBCXX_DEBUG)
+##add_compile_options(-O0)
+#
+#install(TARGETS ${TEST_CPU} DESTINATION ${CMAKE_SOURCE_DIR}/bin)
 
 ####################
 # test a toy implementation for vmap
 ####################
-find_package(Torch REQUIRED)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+#find_package(Torch REQUIRED)
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+#
+#set(TEST_VMAP test_vmap)
+#add_executable(${TEST_VMAP} test_vmap.cc)
+#
+#target_link_libraries(${TEST_VMAP} ${TORCH_LIBRARIES})
+#set_property(TARGET ${TEST_VMAP} PROPERTY CXX_STANDARD 14)
+##target_compile_features(${TEST_CPU} PRIVATE cxx_std_14)
+##add_compile_options(-O0 -g -D_GNU_SOURCE -D_GLIBCXX_DEBUG)
+##add_compile_options(-O0)
+#
+#install(TARGETS ${TEST_VMAP} DESTINATION ${CMAKE_SOURCE_DIR}/bin)
 
-set(TEST_VMAP test_vmap)
-add_executable(${TEST_VMAP} test_vmap.cc)
-
-target_link_libraries(${TEST_VMAP} ${TORCH_LIBRARIES})
-set_property(TARGET ${TEST_VMAP} PROPERTY CXX_STANDARD 14)
-#target_compile_features(${TEST_CPU} PRIVATE cxx_std_14)
-#add_compile_options(-O0 -g -D_GNU_SOURCE -D_GLIBCXX_DEBUG)
-#add_compile_options(-O0)
-
-install(TARGETS ${TEST_VMAP} DESTINATION ${CMAKE_SOURCE_DIR}/bin)
+####################
+# speed memroy for gpu
+####################
+#find_package(Torch REQUIRED)
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+#
+#set(TEST_GPU_MEM test_gpu_mem)
+#add_executable(${TEST_GPU_MEM} test_gpu_mem.cc)
+#
+#target_link_libraries(${TEST_GPU_MEM} ${TORCH_LIBRARIES})
+#set_property(TARGET ${TEST_GPU_MEM} PROPERTY CXX_STANDARD 14)
+##target_compile_features(${TEST_CPU} PRIVATE cxx_std_14)
+##add_compile_options(-O0 -g -D_GNU_SOURCE -D_GLIBCXX_DEBUG)
+##add_compile_options(-O0)
+#
+#install(TARGETS ${TEST_GPU_MEM} DESTINATION ${CMAKE_SOURCE_DIR}/bin)

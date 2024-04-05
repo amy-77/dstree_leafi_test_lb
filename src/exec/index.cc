@@ -733,7 +733,7 @@ RESPONSE dstree::Index::train(bool is_retrain) {
 
     if (config_.get().filter_train_num_local_example_ > 0) {
       // generate and *search* local queries
-      RESPONSE return_code = static_cast<RESPONSE>(return_code | query_synthesizer.generate_local_data());
+      RESPONSE return_code = query_synthesizer.generate_local_data();
 
       if (return_code == FAILURE) {
         spdlog::error("failed to generate local queries");
@@ -894,7 +894,14 @@ RESPONSE dstree::Index::load() {
 }
 
 RESPONSE dstree::Index::dump() const {
-  ID_TYPE ofs_buf_size = sizeof(ID_TYPE) * config_.get().series_length_ * 2; // 2x expanded for safety
+  ID_TYPE ofs_buf_size = config_.get().filter_train_nexample_;
+  if (config_.get().filter_train_num_global_example_ > ofs_buf_size) {
+    ofs_buf_size = config_.get().filter_train_num_global_example_;
+  }
+  if (config_.get().filter_train_num_local_example_ > ofs_buf_size) {
+    ofs_buf_size = config_.get().filter_train_num_local_example_;
+  }
+  ofs_buf_size *= sizeof(ID_TYPE) * config_.get().series_length_;
   void *ofs_buf = std::malloc(ofs_buf_size);
 
   root_->dump(ofs_buf);
@@ -1042,18 +1049,24 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TY
         if (visited_node_counter < config_.get().search_max_nnode_ &&
             visited_series_counter < config_.get().search_max_nseries_) {
           if (node_to_visit.get().get_id() != resident_node.get().get_id()) {
+#ifdef DEBUG
+#ifndef DEBUGGED
+            spdlog::debug("query {:d} node_i {:d} ({:d}) lb {:.3f} bsf {:.3f}",
+                          answers.get()->query_id_, node_to_visit.get().get_id(), visited_node_counter,
+                          node2visit_lbdistance, answers->get_bsf());
+#endif
+#endif
+
             if (config_.get().examine_ground_truth_ || answers->is_bsf(node2visit_lbdistance)) {
               if (node_to_visit.get().has_active_filter()) {
                 VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
 
 #ifdef DEBUG
 #ifndef DEBUGGED
-                spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f} pred {:.3f}",
+                spdlog::debug("query {:d} node_i {:d} ({:d}) lb {:.3f} bsf {:.3f} pred {:.3f}",
                               answers.get()->query_id_,
-                              node_to_visit.get().get_id(),
-                              node2visit_lbdistance,
-                              answers->get_bsf(),
-                              predicted_nn_distance);
+                              node_to_visit.get().get_id(), visited_node_counter,
+                              node2visit_lbdistance, answers->get_bsf(), predicted_nn_distance);
 #endif
 #endif
 

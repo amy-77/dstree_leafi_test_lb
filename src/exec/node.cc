@@ -467,7 +467,7 @@ RESPONSE dstree::Node::dump(void *ofs_buf) const {
       config_.get().index_dump_file_postfix_;
 
   std::ofstream node_ofs(node_info_filepath, std::ios::out | std::ios::binary);
-//  assert(node_fos.is_open());
+  assert(node_ofs.is_open());
 
   auto ofs_id_buf = reinterpret_cast<ID_TYPE *>(ofs_buf);
 
@@ -490,7 +490,12 @@ RESPONSE dstree::Node::dump(void *ofs_buf) const {
     split_->dump(node_ofs, ofs_buf);
   }
 
+//  spdlog::debug("node {:d} buffer dump {:s} load {:s}",
+//                id_, buffer_.get().dump_filepath_, buffer_.get().load_filepath_);
+  buffer_.get().dump(node_ofs);
+
   if (filter_ != nullptr) {
+    assert(filter_.get()->get_id() >= 0);
     ofs_id_buf[0] = filter_.get()->get_id();
   } else {
     ofs_id_buf[0] = -1;
@@ -501,16 +506,15 @@ RESPONSE dstree::Node::dump(void *ofs_buf) const {
     filter_->dump(node_ofs);
   }
 
-  if (buffer_.get().size() > 0) {
-    ofs_id_buf[0] = 1;
-  } else {
-    ofs_id_buf[0] = -1;
-  }
-  node_ofs.write(reinterpret_cast<char *>(ofs_id_buf), sizeof(ID_TYPE));
+//  if (filter_ != nullptr) {
+//    spdlog::debug("dump node {:d} filter {:d} size {:d} {:d} cache {:d}",
+//                  id_, filter_.get()->get_id(), nseries_, buffer_.get().size(), buffer_.get().cached_size_);
+//  } else {
+//    spdlog::debug("dump node {:d} size {:d} {:d} cache {:d}",
+//                  id_, nseries_, buffer_.get().size(), buffer_.get().cached_size_);
+//  }
 
-  buffer_.get().dump(node_ofs);
-
-//  assert(node_fos.good());
+  assert(node_ofs.good());
   node_ofs.close();
 
   if (!children_.empty()) {
@@ -535,11 +539,10 @@ RESPONSE dstree::Node::load(void *ifs_buf,
   }
 
   std::ifstream node_ifs(node_info_filepath, std::ios::in | std::ios::binary);
-//  assert(node_ifs.is_open());
+  assert(node_ifs.is_open());
 
   auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
 
-  // id_, depth_, nseries_
   ID_TYPE read_nbytes = sizeof(ID_TYPE) * 3;
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   id_ = ifs_id_buf[0];
@@ -575,6 +578,15 @@ RESPONSE dstree::Node::load(void *ifs_buf,
     }
   }
 
+  status = buffer_.get().load(node_ifs, ifs_buf);
+  assert(nseries_ == buffer_.get().size());
+
+  if (status == FAILURE) {
+    spdlog::error("node {:d} buffer loading failed", id_);
+    node_ifs.close();
+    return FAILURE;
+  }
+
   read_nbytes = sizeof(ID_TYPE);
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   ID_TYPE filter_id = ifs_id_buf[0];
@@ -590,22 +602,16 @@ RESPONSE dstree::Node::load(void *ifs_buf,
     }
   }
 
-  read_nbytes = sizeof(ID_TYPE);
-  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-  ID_TYPE has_buffer = ifs_id_buf[0];
-
-  if (has_buffer > 0) {
-    status = buffer_.get().load(node_ifs, ifs_buf);
-
-    if (status == FAILURE) {
-      spdlog::error("node {:d} buffer loading failed", id_);
-      node_ifs.close();
-      return FAILURE;
-    }
-  }
+//  if (filter_ != nullptr) {
+//    spdlog::debug("load node {:d} filter {:d} size {:d} {:d}",
+//                  id_, filter_.get()->get_id(), nseries_, buffer_.get().size());
+//  } else {
+//    spdlog::debug("load node {:d} size {:d} {:d}",
+//                  id_, nseries_, buffer_.get().size());
+//  }
 
   // TODO some nodes report node_ifs.good() == 0
-//  assert(node_ifs.good());
+  assert(node_ifs.good());
   node_ifs.close();
 
   if (!children_.empty()) {

@@ -77,7 +77,8 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_run
     num_conformal_examples = num_global_valid_examples;
   } else {
     if (config_.get().filter_train_num_global_example_ > 0 && config_.get().filter_train_num_local_example_) {
-      ID_TYPE num_global_train_examples = config_.get().filter_train_num_global_example_ * config_.get().filter_train_val_split_;
+      ID_TYPE num_global_train_examples =
+          config_.get().filter_train_num_global_example_ * config_.get().filter_train_val_split_;
       ID_TYPE num_global_valid_examples = config_.get().filter_train_num_global_example_ - num_global_train_examples;
 
       num_conformal_examples = num_global_valid_examples;
@@ -628,8 +629,7 @@ VALUE_TYPE dstree::Filter::infer(torch::Tensor &query_series) const {
 RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
   node_fos.write(reinterpret_cast<const char *>(&global_data_size_), sizeof(ID_TYPE));
 
-  // TODO condense size indicators into a bitmap, as they all = train_size_
-  // bsf_distances_
+  assert(global_bsf_distances_.size() == global_data_size_);
   ID_TYPE size_placeholder = global_bsf_distances_.size();
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
   if (!global_bsf_distances_.empty()) {
@@ -637,7 +637,7 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
                    sizeof(VALUE_TYPE) * global_bsf_distances_.size());
   }
 
-  // nn_distances_
+  assert(global_lnn_distances_.size() == global_data_size_);
   size_placeholder = global_lnn_distances_.size();
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
   if (!global_lnn_distances_.empty()) {
@@ -645,21 +645,21 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
                    sizeof(VALUE_TYPE) * global_lnn_distances_.size());
   }
 
-  // lb_distances_
+  assert(lb_distances_.size() == global_data_size_);
   size_placeholder = lb_distances_.size();
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
   if (!lb_distances_.empty()) {
     node_fos.write(reinterpret_cast<const char *>(lb_distances_.data()), sizeof(VALUE_TYPE) * lb_distances_.size());
   }
 
-  // ub_distances_
+  assert(ub_distances_.size() == global_data_size_);
   size_placeholder = ub_distances_.size();
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
   if (!ub_distances_.empty()) {
     node_fos.write(reinterpret_cast<const char *>(ub_distances_.data()), sizeof(VALUE_TYPE) * ub_distances_.size());
   }
 
-  // pred_distances_
+  assert(global_pred_distances_.size() == global_data_size_);
   size_placeholder = global_pred_distances_.size();
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
   if (!global_pred_distances_.empty()) {
@@ -669,18 +669,20 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
 
   node_fos.write(reinterpret_cast<const char *>(&local_data_size_), sizeof(ID_TYPE));
 
+  assert(config_.get().series_length_ * local_data_size_ == local_queries_.size());
+  assert(local_lnn_distances_.size() == local_data_size_);
   if (local_data_size_ > 0) {
-    // local_queries_
     size_placeholder = local_queries_.size();
     node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+
     if (!local_queries_.empty()) {
       node_fos.write(reinterpret_cast<const char *>(local_queries_.data()),
                      sizeof(VALUE_TYPE) * local_queries_.size());
     }
 
-    // local_lnn_distances_
     size_placeholder = local_lnn_distances_.size();
     node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
+
     if (!local_lnn_distances_.empty()) {
       node_fos.write(reinterpret_cast<const char *>(local_lnn_distances_.data()),
                      sizeof(VALUE_TYPE) * local_lnn_distances_.size());
@@ -688,10 +690,13 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
 
   }
 
+//  spdlog::debug("dump filter {:d} global {:d} local {:d} active {:b} train {:b}",
+//                id_, global_data_size_, local_data_size_, is_active_, is_trained_);
+
   if (is_active_) {
     size_placeholder = model_setting_ref_.get().model_setting_str.size();
   } else {
-    size_placeholder = 0;
+    size_placeholder = -1;
   }
   node_fos.write(reinterpret_cast<const char *>(&size_placeholder), sizeof(ID_TYPE));
   if (is_active_) {
@@ -707,6 +712,8 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
   if (is_trained_) {
     std::string model_filepath = config_.get().dump_filters_folderpath_ + std::to_string(id_) +
         config_.get().model_dump_file_postfix_;
+
+//    spdlog::debug("filter {:d} model {:s}", id_, model_filepath);
 
     torch::save(model_, model_filepath);
   }
@@ -727,12 +734,13 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   auto ifs_id_buf = reinterpret_cast<ID_TYPE *>(ifs_buf);
   auto ifs_value_buf = reinterpret_cast<VALUE_TYPE *>(ifs_buf);
 
-  // train_size_
+  // global_data_size_
   ID_TYPE read_nbytes = sizeof(ID_TYPE);
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   global_data_size_ = ifs_id_buf[0];
 
   // bsf_distances_
+  read_nbytes = sizeof(ID_TYPE);
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   ID_TYPE size_indicator = ifs_id_buf[0];
 
@@ -741,6 +749,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
     global_bsf_distances_.insert(global_bsf_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
   }
+  assert(global_bsf_distances_.size() == global_data_size_);
 
   // nn_distances_
   read_nbytes = sizeof(ID_TYPE);
@@ -752,6 +761,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
     global_lnn_distances_.insert(global_lnn_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
   }
+  assert(global_lnn_distances_.size() == global_data_size_);
 
   // lb_distances_
   read_nbytes = sizeof(ID_TYPE);
@@ -763,6 +773,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
     lb_distances_.insert(lb_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
   }
+  assert(lb_distances_.size() == global_data_size_);
 
   // ub_distances_
   read_nbytes = sizeof(ID_TYPE);
@@ -774,6 +785,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
     ub_distances_.insert(ub_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
   }
+  assert(ub_distances_.size() == 0);
 
   // pred_distances_
   read_nbytes = sizeof(ID_TYPE);
@@ -785,33 +797,44 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
     global_pred_distances_.insert(global_pred_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
   }
+  assert(global_pred_distances_.size() == global_data_size_);
 
   // local_data_size_
   read_nbytes = sizeof(ID_TYPE);
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   local_data_size_ = ifs_id_buf[0];
 
-  // local_queries_
-  read_nbytes = sizeof(ID_TYPE);
-  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-  size_indicator = ifs_id_buf[0];
-
-  if (size_indicator > 0) {
-    read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+  if (local_data_size_ > 0) {
+    // local_queries_
+    read_nbytes = sizeof(ID_TYPE);
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-    local_queries_.insert(local_queries_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
-  }
+    size_indicator = ifs_id_buf[0];
+    assert(size_indicator == config_.get().series_length_ * local_data_size_);
 
-  // local_lnn_distances_
-  read_nbytes = sizeof(ID_TYPE);
-  node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-  size_indicator = ifs_id_buf[0];
+    if (size_indicator > 0) {
+      local_queries_.reserve(size_indicator);
 
-  if (size_indicator > 0) {
-    read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+      read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+      node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+      local_queries_.insert(local_queries_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+    }
+
+    // local_lnn_distances_
+    read_nbytes = sizeof(ID_TYPE);
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
-    local_lnn_distances_.insert(local_lnn_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+    size_indicator = ifs_id_buf[0];
+    assert(size_indicator == local_data_size_);
+
+    if (size_indicator > 0) {
+      local_lnn_distances_.reserve(size_indicator);
+
+      read_nbytes = sizeof(VALUE_TYPE) * size_indicator;
+      node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
+      local_lnn_distances_.insert(local_lnn_distances_.begin(), ifs_value_buf, ifs_value_buf + size_indicator);
+    }
   }
+  assert(local_queries_.size() == config_.get().series_length_ * local_data_size_);
+  assert(local_lnn_distances_.size() == local_data_size_);
 
   // model_setting_
   is_active_ = false;
@@ -838,7 +861,7 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   read_nbytes = sizeof(ID_TYPE);
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   size_indicator = ifs_id_buf[0];
-  if (size_indicator > 0 && config_.get().to_load_filters_) {
+  if (size_indicator > 0) {
     std::string model_filepath = config_.get().load_filters_folderpath_ + std::to_string(id_) +
         config_.get().model_dump_file_postfix_;
 
@@ -867,7 +890,9 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
 //  net->to(torch::Device(torch::kCPU));
     c10::cuda::CUDACachingAllocator::emptyCache();
 
-    is_trained_ = true;
+    if (config_.get().to_load_filters_) {
+      is_trained_ = true;
+    }
   }
 
   // conformal_predictor_
@@ -882,6 +907,9 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
       fit_conformal_predictor();
     }
   }
+
+//  spdlog::debug("load filter {:d} global {:d} local {:d} active {:b} trained {:b}",
+//                id_, global_data_size_, local_data_size_, is_active_, is_trained_);
 
   return SUCCESS;
 }

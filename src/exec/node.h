@@ -129,6 +129,12 @@ class Node {
     return filter_->push_local_example(series, nn_distance);
   }
 
+//  RESPONSE dump_local_example() {
+//    std::string filter_query_filepath = config_.get().index_dump_folderpath_ +
+//        std::to_string(id_) + config_.get().filter_query_filename_;
+//    return filter_->dump_local_example(filter_query_filepath);
+//  }
+
   std::vector<std::reference_wrapper<Node>>::iterator begin() {
     if (children_refs_.empty()) {
       for (auto &child_node : children_) {

@@ -240,9 +240,11 @@ RESPONSE dstree::Buffer::clean(bool if_remove_cache) {
 
 RESPONSE dstree::Buffer::dump(std::ofstream &node_ofs) const {
   node_ofs.write(reinterpret_cast<const char *>(&size_), sizeof(ID_TYPE));
+  assert(offsets_.size() == size_);
+
+//  spdlog::debug("buffer dump size {:d} offsets.size {:d}", size_, offsets_.size());
 
   if (size_ > 0) {
-    assert(offsets_.size() == size_);
     node_ofs.write(reinterpret_cast<const char *>(offsets_.data()), sizeof(ID_TYPE) * offsets_.size());
   }
 
@@ -256,10 +258,15 @@ RESPONSE dstree::Buffer::load(std::ifstream &node_ifs, void *ifs_buf) {
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   size_ = ifs_id_buf[0];
 
+//  spdlog::debug("buffer load size {:d} offsets.size {:d}", size_, offsets_.size());
+
   if (size_ > 0) {
     read_nbytes = sizeof(ID_TYPE) * size_;
     node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
     offsets_.insert(offsets_.begin(), ifs_id_buf, ifs_id_buf + size_);
+  } else {
+    // TODO fix the size_ = -4294967296 problem when dump size_ = 0
+    size_ = 0;
   }
 
   return SUCCESS;

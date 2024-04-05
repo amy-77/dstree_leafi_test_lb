@@ -117,6 +117,7 @@ void generation_thread_F(LocalGenerationCache &generation_cache) {
   gsl_rng_set(r, (unsigned long) time(nullptr));
 
   ID_TYPE num_leaves = generation_cache.leaves_.size();
+
   pthread_mutex_lock(generation_cache.leaves_mutex_);
   ID_TYPE local_leaf_i = *generation_cache.leaf_i_;
   *generation_cache.leaf_i_ += 1;
@@ -158,19 +159,27 @@ void generation_thread_F(LocalGenerationCache &generation_cache) {
         VALUE_TYPE local_nn_distance = current_node.search(generated_series_ptr, m256_fetch_cache);
 
         if (local_nn_distance > max_legal_lnn_distance) {
-          spdlog::error("thread {:d} node {:d} series {:d} +noise {:.3f} escaped the local neighbourhood ({:.3f} > {:.3f}); regenerate",
-                        generation_cache.thread_id_, current_node.get_id(), series_i, noise_level,
-                        local_nn_distance, max_legal_lnn_distance);
+          spdlog::error(
+              "thread {:d} node {:d} series {:d} +noise {:.3f} escaped the local neighbourhood ({:.3f} > {:.3f}); regenerate",
+              generation_cache.thread_id_,
+              current_node.get_id(),
+              series_i,
+              noise_level,
+              local_nn_distance,
+              max_legal_lnn_distance);
+
           query_i -= 1;
         } else {
           current_node.push_local_example(generated_series_ptr, local_nn_distance);
 
           spdlog::info("thread {:d} node {:d} series {:d} +noise {:.3f}, lnn = {:.3f} <= {:.3f}",
-                        generation_cache.thread_id_, current_node.get_id(), series_i, noise_level,
-                        local_nn_distance, max_legal_lnn_distance);
+                       generation_cache.thread_id_, current_node.get_id(), series_i, noise_level,
+                       local_nn_distance, max_legal_lnn_distance);
         }
       }
     }
+
+//    current_node.dump_local_example();
 
     pthread_mutex_lock(generation_cache.leaves_mutex_);
     local_leaf_i = *generation_cache.leaf_i_;
@@ -178,9 +187,9 @@ void generation_thread_F(LocalGenerationCache &generation_cache) {
     pthread_mutex_unlock(generation_cache.leaves_mutex_);
   }
 
+  gsl_rng_free(r);
   free(m256_fetch_cache);
   free(generated_series_ptr);
-  gsl_rng_free(r);
 }
 
 RESPONSE dstree::Synthesizer::generate_local_data() {

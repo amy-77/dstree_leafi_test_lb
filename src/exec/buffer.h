@@ -53,7 +53,9 @@ class Buffer {
 
  private:
   bool is_on_disk_;
-  ID_TYPE capacity_, size_, cached_size_;
+  ID_TYPE capacity_;
+  ID_TYPE size_;
+  ID_TYPE cached_size_;
   ID_TYPE series_length_;
 
   std::vector<ID_TYPE> offsets_;

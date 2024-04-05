@@ -48,6 +48,13 @@ class Filter {
     return SUCCESS;
   };
 
+//  RESPONSE dump_local_example(const std::string &filter_query_filepath) {
+//    std::ofstream query_fout(filter_query_filepath, std::ios::binary | std::ios_base::app);
+//    query_fout.write(reinterpret_cast<char *>(local_queries_.data()), sizeof(VALUE_TYPE) * local_queries_.size());
+//    query_fout.close();
+//    return SUCCESS;
+//  };
+
   bool is_active() const { return is_active_; }
   RESPONSE activate(MODEL_SETTING &model_setting) {
     if (model_setting.model_setting_str != model_setting_ref_.get().model_setting_str) {

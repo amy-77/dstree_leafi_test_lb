@@ -97,6 +97,10 @@ class Node {
     return filter_->set_abs_error_interval_by_recall(recall);
   };
 
+  RESPONSE set_filter_abs_error_interval(VALUE_TYPE abs_error) {
+    return filter_->set_abs_error_interval(abs_error);
+  };
+
   VALUE_TYPE get_envelop_pruning_frequency() const {
     return filter_.get()->get_node_summarization_pruning_frequency();
   };

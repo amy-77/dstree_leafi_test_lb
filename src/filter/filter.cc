@@ -163,7 +163,7 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_run
     auto residual_i = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(residuals.size())
         * config_.get().filter_trial_confidence_level_);
 
-    conformal_predictor_->set_alpha(residuals[residual_i], true);
+    conformal_predictor_->set_alpha(residuals[residual_i], true, false);
 
 #ifdef DEBUG
 //#ifndef DEBUGGED

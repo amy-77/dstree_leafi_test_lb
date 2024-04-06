@@ -24,7 +24,8 @@ dstree::Allocator::Allocator(dstree::Config &config,
                              ID_TYPE nfilters) :
     config_(config),
     is_recall_calculated_(false),
-    node_size_threshold_(0) {
+    node_size_threshold_(0),
+    min_validation_recall_(1) {
 
   if (config_.get().filter_infer_is_gpu_) {
     if (torch::cuda::is_available()) {
@@ -748,7 +749,12 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
         }
       }
 
-      validation_recalls_.push_back(static_cast<ERROR_TYPE>(hit_count) / num_conformal_examples);
+      ERROR_TYPE recall = static_cast<ERROR_TYPE>(hit_count) / num_conformal_examples;
+      if (min_validation_recall_ > recall) {
+        min_validation_recall_ = recall;
+      }
+
+      validation_recalls_.push_back(recall);
     }
 
     // to adjust the recalls to be strictly increasing
@@ -762,6 +768,11 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
     spdlog::debug("allocator recalls = {:s}",
                   upcite::array2str(validation_recalls_.data(), validation_recalls_.size()));
 
+    // could be adjusted for ensuring monotonically incremental
+    if (min_validation_recall_ > validation_recalls_[0]) {
+      min_validation_recall_ = validation_recalls_[0];
+    }
+
     is_recall_calculated_ = true;
 
     if (config_.get().filter_conformal_is_smoothen_) {
@@ -773,45 +784,64 @@ RESPONSE dstree::Allocator::set_confidence_from_recall() {
     }
   }
 
-  if (config_.get().filter_conformal_is_smoothen_) {
+  if (min_validation_recall_ > config_.get().filter_conformal_recall_) {
+    spdlog::info("allocator requested recall {:.4f} out of trained min {:.4f}; do NOT adjust",
+                 config_.get().filter_conformal_recall_, min_validation_recall_);
+
     for (auto &filter_info : filter_infos_) {
       if (filter_info.node_.get().has_active_filter()) {
-        if (filter_info.node_.get().set_filter_abs_error_interval_by_recall(config_.get().filter_conformal_recall_)
-            == FAILURE) {
-          spdlog::error("allocator failed to get node {:d} conformed at recall {:.3f}",
-                        filter_info.node_.get().get_id(),
-                        config_.get().filter_conformal_recall_);
+        if (filter_info.node_.get().set_filter_abs_error_interval(0) == FAILURE) {
+          spdlog::error("allocator failed to get node {:d} conformed by 0",
+                        filter_info.node_.get().get_id());
         }
 
-        spdlog::info("allocator node {:d} abs_error {:.3f} at {:.4f}",
+        spdlog::info("allocator node {:d} abs_error {:.3f} at min {:.4f}; requested {:.4f}",
                      filter_info.node_.get().get_id(),
                      filter_info.node_.get().get_filter_abs_error_interval(),
-                     config_.get().filter_conformal_recall_);
+                     min_validation_recall_, config_.get().filter_conformal_recall_);
       }
     }
   } else {
-    ID_TYPE last_recall_i = validation_recalls_.size() - 1;
+    if (config_.get().filter_conformal_is_smoothen_) {
+      for (auto &filter_info : filter_infos_) {
+        if (filter_info.node_.get().has_active_filter()) {
+          if (filter_info.node_.get().set_filter_abs_error_interval_by_recall(config_.get().filter_conformal_recall_)
+              == FAILURE) {
+            spdlog::error("allocator failed to get node {:d} conformed at recall {:.3f}",
+                          filter_info.node_.get().get_id(),
+                          config_.get().filter_conformal_recall_);
+          }
 
-    for (ID_TYPE recall_i = validation_recalls_.size() - 2; recall_i >= 0; --recall_i) {
-      if (validation_recalls_[recall_i] < config_.get().filter_conformal_recall_) {
-        last_recall_i = recall_i + 1;
-
-        spdlog::info("allocator reached recall {:.3f} with error_i {:.3f} ({:d}/{:d}, 2 sentries included)",
-                     validation_recalls_[last_recall_i],
-                     static_cast<VALUE_TYPE>(last_recall_i) / validation_recalls_.size(),
-                     last_recall_i,
-                     validation_recalls_.size());
-        break;
+          spdlog::info("allocator node {:d} abs_error {:.3f} at {:.4f}",
+                       filter_info.node_.get().get_id(),
+                       filter_info.node_.get().get_filter_abs_error_interval(),
+                       config_.get().filter_conformal_recall_);
+        }
       }
-    }
+    } else {
+      ID_TYPE last_recall_i = validation_recalls_.size() - 1;
 
-    for (auto &filter_info : filter_infos_) {
-      if (filter_info.node_.get().has_active_filter()) {
-        if (filter_info.node_.get().set_filter_abs_error_interval_by_pos(last_recall_i) == FAILURE) {
-          spdlog::error("allocator failed to get node {:d} conformed with abs {:.3f} at pos {:d}",
-                        filter_info.node_.get().get_id(),
-                        filter_info.node_.get().get_filter_abs_error_interval_by_pos(last_recall_i),
-                        last_recall_i);
+      for (ID_TYPE recall_i = validation_recalls_.size() - 2; recall_i >= 0; --recall_i) {
+        if (validation_recalls_[recall_i] < config_.get().filter_conformal_recall_) {
+          last_recall_i = recall_i + 1;
+
+          spdlog::info("allocator reached recall {:.3f} with error_i {:.3f} ({:d}/{:d}, 2 sentries included)",
+                       validation_recalls_[last_recall_i],
+                       static_cast<VALUE_TYPE>(last_recall_i) / validation_recalls_.size(),
+                       last_recall_i,
+                       validation_recalls_.size());
+          break;
+        }
+      }
+
+      for (auto &filter_info : filter_infos_) {
+        if (filter_info.node_.get().has_active_filter()) {
+          if (filter_info.node_.get().set_filter_abs_error_interval_by_pos(last_recall_i) == FAILURE) {
+            spdlog::error("allocator failed to get node {:d} conformed with abs {:.3f} at pos {:d}",
+                          filter_info.node_.get().get_id(),
+                          filter_info.node_.get().get_filter_abs_error_interval_by_pos(last_recall_i),
+                          last_recall_i);
+          }
         }
       }
     }

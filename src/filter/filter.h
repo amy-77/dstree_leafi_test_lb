@@ -114,6 +114,10 @@ class Filter {
     return conformal_predictor_->set_alpha_by_recall(recall);
   };
 
+  RESPONSE set_abs_error_interval(VALUE_TYPE abs_error) {
+    return conformal_predictor_->set_alpha(abs_error, false, true);
+  };
+
  private:
   RESPONSE fit_conformal_predictor(bool is_trial = false, bool collect_runtime_stat = false);
 

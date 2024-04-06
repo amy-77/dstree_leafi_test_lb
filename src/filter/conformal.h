@@ -31,7 +31,7 @@ class ConformalPredictor {
   ~ConformalPredictor() = default;
 
   VALUE_TYPE get_alpha() const;
-  RESPONSE set_alpha(VALUE_TYPE alpha, bool is_trial = true);
+  RESPONSE set_alpha(VALUE_TYPE alpha, bool is_trial = true, bool to_rectify = false);
 
   VALUE_TYPE get_alpha_by_pos(ID_TYPE pos) const;
   RESPONSE set_alpha_by_pos(ID_TYPE pos);

@@ -82,6 +82,7 @@ class Allocator {
 
   bool is_recall_calculated_;
   std::vector<ERROR_TYPE> validation_recalls_;
+  ERROR_TYPE min_validation_recall_;
 
   std::vector<ID_TYPE> filter_ids_;
   std::vector<VALUE_TYPE> gains_matrix_;

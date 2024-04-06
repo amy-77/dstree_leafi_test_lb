@@ -145,7 +145,7 @@ VALUE_TYPE upcite::ConformalPredictor::get_alpha() const {
   }
 }
 
-RESPONSE upcite::ConformalPredictor::set_alpha(VALUE_TYPE alpha, bool is_trial) {
+RESPONSE upcite::ConformalPredictor::set_alpha(VALUE_TYPE alpha, bool is_trial, bool to_rectify) {
   if (is_trial) {
     if (is_fitted_) {
       spdlog::error("conformal model is already fitted; cannot run trial");
@@ -156,14 +156,19 @@ RESPONSE upcite::ConformalPredictor::set_alpha(VALUE_TYPE alpha, bool is_trial) 
       is_trial_ = true;
     }
   } else if (is_fitted_) {
-    spdlog::error("conformal model is already fitted; cannot directly adjust alpha");
-    return FAILURE;
+    if (to_rectify) {
+      alpha_ = alpha;
+    } else {
+      spdlog::error("conformal model is already fitted; cannot directly adjust alpha");
+      return FAILURE;
+    }
   } else {
     alpha_ = alpha;
   }
 
   return SUCCESS;
 }
+
 VALUE_TYPE upcite::ConformalPredictor::get_alpha_by_pos(ID_TYPE pos) const {
   if (pos >= 0 && pos < alphas_.size()) {
     return alphas_[pos];

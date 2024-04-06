@@ -196,6 +196,7 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_run
   } else {
     spdlog::error("trial filter {:d} model {:s} both trial and collect modes were triggered",
                   id_, model_setting_ref_.get().model_setting_str);
+    return FAILURE;
   }
 
   return SUCCESS;
@@ -902,9 +903,9 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   if (size_indicator > 0) {
     conformal_predictor_->load(node_ifs, ifs_buf);
 
-    if (config_.get().filter_is_conformal_) {
+    if (is_active_ && is_trained_ && config_.get().filter_is_conformal_) {
       // TODO check compatibility between the loaded setting and the new setting
-      fit_conformal_predictor();
+      fit_conformal_predictor(false, false);
     }
   }
 

@@ -836,6 +836,15 @@ RESPONSE dstree::Index::train(bool is_retrain) {
 
 RESPONSE dstree::Index::load() {
   ID_TYPE ifs_buf_size = sizeof(ID_TYPE) * config_.get().leaf_max_nseries_ * 2; // 2x expanded for safety
+  ID_TYPE max_num_local_bytes = config_.get().filter_train_num_local_example_;
+  if (config_.get().filter_train_num_global_example_ > max_num_local_bytes) {
+    max_num_local_bytes = config_.get().filter_train_num_global_example_;
+  }
+  max_num_local_bytes *= sizeof(VALUE_TYPE) * config_.get().series_length_;
+  if (max_num_local_bytes > ifs_buf_size) {
+    ifs_buf_size = max_num_local_bytes;
+  }
+
   void *ifs_buf = std::malloc(ifs_buf_size);
 
   nnode_ = 0;
@@ -843,13 +852,11 @@ RESPONSE dstree::Index::load() {
 
   RESPONSE status = root_->load(ifs_buf, std::ref(*buffer_manager_), nnode_, nleaf_);
 
+  std::free(ifs_buf);
   if (status == FAILURE) {
     spdlog::info("failed to load index");
-    std::free(ifs_buf);
     return FAILURE;
   }
-
-  std::free(ifs_buf);
 
   // TODO in-memory only; supports on-disk
   if (!config_.get().on_disk_) {

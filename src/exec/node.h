@@ -53,7 +53,7 @@ class Node {
                   ID_TYPE &visited_series_counter) const;
 
   VALUE_TYPE search(const VALUE_TYPE *query_series_ptr,
-                    VALUE_TYPE *m256_fetch_cache,
+                    VALUE_TYPE *m256_fetch_cache = nullptr,
                     VALUE_TYPE bsf_distance = -1) const;
 
   VALUE_TYPE search_mt(const VALUE_TYPE *query_series_ptr,

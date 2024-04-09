@@ -112,7 +112,8 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_train_num_local_example_(-1),
     filter_query_min_noise_(0.1),
     filter_query_max_noise_(0.4),
-    dump_query_folderpath_("") {
+    dump_query_folderpath_(""),
+    is_profile_(false) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -309,7 +310,10 @@ dstree::Config::Config(int argc, char *argv[]) :
        "The min noise level to add to a random series to generate a synthetic query")
       ("filter_query_max_noise",
        po::value<VALUE_TYPE>(&filter_query_max_noise_)->default_value(0.4),
-       "The max noise level to add to a random series to generate a synthetic query");
+       "The max noise level to add to a random series to generate a synthetic query")
+      ("is_profile",
+       po::bool_switch(&is_profile_)->default_value(false),
+       "Whether to profile query answering");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -681,4 +685,6 @@ void dstree::Config::log() {
   spdlog::info("filter_query_min_noise = {:.3f}", filter_query_min_noise_);
   spdlog::info("filter_query_max_noise = {:.3f}", filter_query_max_noise_);
   spdlog::info("dump_query_folderpath = {:s}", dump_query_folderpath_);
+
+  spdlog::info("is_profile = {:b}", is_profile_);
 }

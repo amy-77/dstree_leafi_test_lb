@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
     exit(-1);
   }
 
-  index->search();
+  index->search(config->is_profile_);
 
   return 0;
 }

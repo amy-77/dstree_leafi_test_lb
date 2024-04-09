@@ -46,7 +46,7 @@ class Index {
   RESPONSE dump() const;
   RESPONSE load();
 
-  RESPONSE search();
+  RESPONSE search(bool is_profile=false);
   RESPONSE search(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TYPE *sketch_ptr = nullptr);
   RESPONSE search_navigated(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr = nullptr);
 
@@ -54,6 +54,8 @@ class Index {
   RESPONSE insert(ID_TYPE batch_series_id);
 
   RESPONSE train(bool is_retrain = false);
+
+  RESPONSE profile(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TYPE *sketch_ptr = nullptr);
 
   // initialize filter's member variables except the model
   RESPONSE filter_initialize(dstree::Node &node, ID_TYPE *filter_id);

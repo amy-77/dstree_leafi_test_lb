@@ -917,7 +917,7 @@ RESPONSE dstree::Index::dump() const {
   return SUCCESS;
 }
 
-RESPONSE dstree::Index::search() {
+RESPONSE dstree::Index::search(bool is_profile) {
   if (!fs::exists(config_.get().query_filepath_)) {
     spdlog::error("query filepath {:s} does not exist", config_.get().query_filepath_);
 
@@ -986,11 +986,103 @@ RESPONSE dstree::Index::search() {
       sketch_ptr = query_sketch_buffer + config_.get().sketch_length_ * query_id;
     }
 
-    if (config_.get().navigator_is_learned_) {
-      search_navigated(query_id, series_ptr, sketch_ptr);
+    if (is_profile) {
+      profile(query_id, series_ptr, sketch_ptr);
     } else {
-      search(query_id, series_ptr, sketch_ptr);
+      if (config_.get().navigator_is_learned_) {
+        search_navigated(query_id, series_ptr, sketch_ptr);
+      } else {
+        search(query_id, series_ptr, sketch_ptr);
+      }
     }
+  }
+
+  return SUCCESS;
+}
+
+RESPONSE dstree::Index::profile(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TYPE *sketch_ptr) {
+  VALUE_TYPE *route_ptr = query_ptr;
+  if (config_.get().is_sketch_provided_) {
+    route_ptr = sketch_ptr;
+  }
+
+  auto answers = std::make_shared<dstree::Answers>(config_.get().n_nearest_neighbor_, query_id);
+
+  if (config_.get().require_neurofilter_) {
+    filter_query_tsr_ = torch::from_blob(query_ptr,
+                                         {1, config_.get().series_length_},
+                                         torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
+    filter_query_tsr_ = filter_query_tsr_.to(*device_);
+  }
+
+  ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
+
+  if (config_.get().is_exact_search_) {
+    leaf_min_heap_.push(std::make_tuple(std::ref(*root_), root_->cal_lower_bound_EDsquare(route_ptr)));
+
+    // WARN undefined behaviour
+    std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
+    VALUE_TYPE node2visit_lbdistance;
+
+    while (!leaf_min_heap_.empty()) {
+      std::tie(node_to_visit, node2visit_lbdistance) = leaf_min_heap_.top();
+      leaf_min_heap_.pop();
+
+      if (node_to_visit.get().is_leaf()) {
+        if (visited_node_counter < config_.get().search_max_nnode_ &&
+            visited_series_counter < config_.get().search_max_nseries_) {
+          VALUE_TYPE nn_dist = node_to_visit.get().search(query_ptr);
+
+          VALUE_TYPE predicted_nn_distance = -1;
+          if (node_to_visit.get().has_active_filter()) {
+            predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
+          }
+
+#ifdef DEBUG
+//#ifndef DEBUGGED
+          spdlog::debug("profile query {:d} node_i {:d} ({:d}) lb {:.3f} bsf {:.3f} nn {:.3f} pred {:.3f}",
+                        answers.get()->query_id_, node_to_visit.get().get_id(), visited_node_counter,
+                        node2visit_lbdistance, answers->get_bsf(), nn_dist, predicted_nn_distance);
+//#endif
+#endif
+          answers->check_push_bsf(nn_dist, node_to_visit.get().get_id());
+
+          visited_node_counter += 1;
+          visited_series_counter += node_to_visit.get().get_size();
+        }
+      } else {
+        for (auto child_node : node_to_visit.get()) {
+          VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(route_ptr);
+
+          // TODO fix bug: parent LB dist > child LB dist
+          // current workaround: do not early prune
+          leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
+        }
+      }
+    }
+  }
+
+  spdlog::info("query {:d} visited {:d} nodes {:d} series",
+               query_id, visited_node_counter, visited_series_counter);
+
+  ID_TYPE nnn_to_return = config_.get().n_nearest_neighbor_;
+
+  while (!answers->empty()) {
+    auto answer = answers->pop_answer();
+
+    if (answer.node_id_ > 0) {
+      spdlog::info("query {:d} nn {:d} = {:.3f}, node {:d}",
+                   query_id, nnn_to_return, answer.nn_dist_, answer.node_id_);
+    } else {
+      spdlog::info("query {:d} nn {:d} = {:.3f}",
+                   query_id, nnn_to_return, answer.nn_dist_);
+    }
+
+    nnn_to_return -= 1;
+  }
+
+  if (nnn_to_return > 0) {
+    return FAILURE;
   }
 
   return SUCCESS;

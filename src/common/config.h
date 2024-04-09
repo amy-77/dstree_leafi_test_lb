@@ -153,6 +153,8 @@ class Config {
   VALUE_TYPE navigator_combined_lambda_;
   bool navigator_is_gpu_;
   VALUE_TYPE navigator_train_val_split_;
+
+  bool is_profile_;
 };
 
 }

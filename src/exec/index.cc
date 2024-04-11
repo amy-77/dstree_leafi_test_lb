@@ -638,7 +638,7 @@ RESPONSE dstree::Index::train(bool is_retrain) {
         node_cache.pop();
 
         if (node_to_visit.get().is_leaf()) {
-          if (node_to_visit.get().get_size() >= leaf_size_threshold) {
+          if (node_to_visit.get().get_size() >= leaf_size_threshold || config_.get().to_profile_filters_) {
             query_synthesizer.push_node(node_to_visit);
           }
         } else {
@@ -1040,9 +1040,10 @@ RESPONSE dstree::Index::profile(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_T
 
 #ifdef DEBUG
 //#ifndef DEBUGGED
-          spdlog::debug("profile query {:d} node_i {:d} ({:d}) lb {:.3f} bsf {:.3f} nn {:.3f} pred {:.3f}",
+          spdlog::debug("profile query {:d} node_i {:d} ({:d}) lb {:.3f} bsf {:.3f} nn {:.3f} pred {:.3f} + {:.3f}",
                         answers.get()->query_id_, node_to_visit.get().get_id(), visited_node_counter,
-                        node2visit_lbdistance, answers->get_bsf(), nn_dist, predicted_nn_distance);
+                        node2visit_lbdistance, answers->get_bsf(), nn_dist, predicted_nn_distance,
+                        node_to_visit.get().get_filter().get().get_abs_error_interval());
 //#endif
 #endif
           answers->check_push_bsf(nn_dist, node_to_visit.get().get_id());

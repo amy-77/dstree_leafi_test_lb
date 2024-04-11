@@ -66,6 +66,7 @@ class Node {
 
   bool has_filter() const { return filter_ != nullptr; }
   bool has_active_filter() const { return filter_ != nullptr && filter_->is_active(); }
+  bool has_trained_filter() const { return filter_ != nullptr && filter_->is_trained(); }
   VALUE_TYPE filter_infer(torch::Tensor &query_series) const { return filter_->infer(query_series); }
 
   VALUE_TYPE get_filter_nn_distance(ID_TYPE pos) const { return filter_->get_nn_distance(pos); };

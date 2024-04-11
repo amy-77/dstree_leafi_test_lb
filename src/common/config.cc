@@ -113,7 +113,9 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_query_min_noise_(0.1),
     filter_query_max_noise_(0.4),
     dump_query_folderpath_(""),
-    is_profile_(false) {
+    to_profile_search_(false),
+    to_profile_filters_(false),
+    filter_fixed_node_size_threshold_(-1) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
 
   po_desc.add_options()
@@ -311,9 +313,15 @@ dstree::Config::Config(int argc, char *argv[]) :
       ("filter_query_max_noise",
        po::value<VALUE_TYPE>(&filter_query_max_noise_)->default_value(0.4),
        "The max noise level to add to a random series to generate a synthetic query")
-      ("is_profile",
-       po::bool_switch(&is_profile_)->default_value(false),
-       "Whether to profile query answering");
+      ("to_profile_search",
+       po::bool_switch(&to_profile_search_)->default_value(false),
+       "Whether to profile query answering")
+      ("to_profile_filters",
+       po::bool_switch(&to_profile_filters_)->default_value(false),
+       "Whether to profile query answering")
+      ("filter_fixed_node_size_threshold",
+       po::value<ID_TYPE>(&filter_fixed_node_size_threshold_)->default_value(-1),
+       "Whether to use a fixed filter leaf node threshold, instead of run time-based estimation");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, po_desc), vm);
@@ -403,6 +411,13 @@ dstree::Config::Config(int argc, char *argv[]) :
           << "Please specify model settings by setting --filter_model_setting or --filter_candidate_settings_filepath"
           << std::endl;
       exit(-1);
+    }
+
+    if (filter_fixed_node_size_threshold_ >= 0) {
+      if (filter_allocate_is_gain_) {
+        std::cout << "gain-based allocation not supported under fixed node size threshold" << std::endl;
+        exit(-1);
+      }
     }
   }
 
@@ -686,5 +701,8 @@ void dstree::Config::log() {
   spdlog::info("filter_query_max_noise = {:.3f}", filter_query_max_noise_);
   spdlog::info("dump_query_folderpath = {:s}", dump_query_folderpath_);
 
-  spdlog::info("is_profile = {:b}", is_profile_);
+  spdlog::info("to_profile_search = {:b}", to_profile_search_);
+  spdlog::info("to_profile_filters = {:b}", to_profile_filters_);
+
+  spdlog::info("filter_fixed_node_size_threshold = {:d}", filter_fixed_node_size_threshold_);
 }

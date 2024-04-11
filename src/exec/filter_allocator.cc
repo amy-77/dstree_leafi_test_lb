@@ -79,16 +79,17 @@ dstree::Allocator::Allocator(dstree::Config &config,
     }
   }
 #ifdef DEBUG
-  spdlog::info("allocator node size threshold = {:d}; default {:d}",
+  spdlog::info("allocator node size threshold measured {:d}; default {:d}",
                node_size_threshold_, config_.get().filter_default_node_size_threshold_);
 #endif
 
   if (node_size_threshold_ < config_.get().filter_default_node_size_threshold_) {
-    node_size_threshold_ = config_.get().filter_default_node_size_threshold_;
-
 #ifdef DEBUG
-    spdlog::info("allocator node size threshold rectified to default {:d}", node_size_threshold_);
+    spdlog::info("allocator node size threshold measured {:d}; rectified to default {:d}",
+                 node_size_threshold_, config_.get().filter_default_node_size_threshold_);
 #endif
+
+    node_size_threshold_ = config_.get().filter_default_node_size_threshold_;
   }
 }
 
@@ -538,7 +539,8 @@ RESPONSE dstree::Allocator::assign() {
         spdlog::error("allocator gain-based allocation failed; revert to size-based allocation");
 
         for (auto &filter_info : filter_infos_) {
-          if (filter_info.node_.get().get_size() > config_.get().filter_node_size_threshold_
+          if ((filter_info.node_.get().get_size() > config_.get().filter_node_size_threshold_
+              || config_.get().to_profile_filters_)
               && allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb <= available_gpu_memory_mb_) {
             if (filter_info.node_.get().activate_filter(candidate_model_settings_[0]) == SUCCESS) {
               allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
@@ -550,14 +552,17 @@ RESPONSE dstree::Allocator::assign() {
         }
       } else {
         for (auto &filter_info : filter_infos_) {
-          if (allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb > available_gpu_memory_mb_
-              || filter_info.score <= 0) {
+          if (allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb > available_gpu_memory_mb_) {
             break;
           }
 
-          if (filter_info.node_.get().activate_filter(filter_info.model_setting) == SUCCESS) {
-            allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
-            allocated_filters_count += 1;
+          if (config_.get().to_profile_filters_ || filter_info.score > 0) {
+            if (filter_info.node_.get().activate_filter(filter_info.model_setting) == SUCCESS) {
+              allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
+              allocated_filters_count += 1;
+            }
+          } else if (filter_info.score <= 0) {
+            break;
           }
         }
       }
@@ -576,15 +581,23 @@ RESPONSE dstree::Allocator::assign() {
                      candidate_model_settings_[0].model_setting_str);
       }
 
+      ID_TYPE filter_node_size_threshold = config_.get().filter_fixed_node_size_threshold_;
+      if (filter_node_size_threshold < 0) {
+        filter_node_size_threshold = node_size_threshold_;
+      }
+      spdlog::info("allocator assign filter_node_size_threshold {:d}, measured {:d} fixed {:d}",
+                   filter_node_size_threshold, node_size_threshold_, config_.get().filter_fixed_node_size_threshold_);
+
       for (auto &filter_info : filter_infos_) {
-        if (filter_info.node_.get().get_size() > config_.get().filter_node_size_threshold_
+        if ((filter_info.node_.get().get_size() >= filter_node_size_threshold
+            || config_.get().to_profile_filters_)
             && allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb <= available_gpu_memory_mb_) {
           if (filter_info.node_.get().activate_filter(candidate_model_settings_[0]) == SUCCESS) {
             allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
             allocated_filters_count += 1;
           }
         } else {
-          break;
+          filter_info.node_.get().deactivate_filter();
         }
       }
     }
@@ -653,18 +666,29 @@ RESPONSE dstree::Allocator::reassign() {
                      candidate_model_settings_[0].model_setting_str);
       }
 
+      ID_TYPE filter_node_size_threshold = config_.get().filter_fixed_node_size_threshold_;
+      if (filter_node_size_threshold < 0) {
+        filter_node_size_threshold = node_size_threshold_;
+      }
+      spdlog::info("allocator reassign filter_node_size_threshold {:d}, measured {:d} fixed {:d}",
+                   filter_node_size_threshold, node_size_threshold_, config_.get().filter_fixed_node_size_threshold_);
+
       for (auto &filter_info : filter_infos_) {
-        if (filter_info.node_.get().get_size() > config_.get().filter_node_size_threshold_) {
+        if (filter_info.node_.get().get_size() >= filter_node_size_threshold
+            && filter_info.node_.get().has_trained_filter()
+            && allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb <= available_gpu_memory_mb_) {
           if (filter_info.node_.get().activate_filter(candidate_model_settings_[0]) == SUCCESS) {
             allocated_gpu_memory_mb += filter_info.model_setting.get().gpu_mem_mb;
             allocated_filters_count += 1;
           }
+        } else {
+          filter_info.node_.get().deactivate_filter();
         }
       }
     }
   }
 
-  spdlog::info("allocator re-assigned {:d} models of {:.1f}/{:.1f}mb gpu memory",
+  spdlog::info("allocator reassigned {:d} models of {:.1f}/{:.1f}mb gpu memory",
                allocated_filters_count, allocated_gpu_memory_mb, available_gpu_memory_mb_);
   return SUCCESS;
 }

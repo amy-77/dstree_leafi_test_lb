@@ -131,6 +131,7 @@ class Config {
   std::string filter_candidate_settings_filepath_;
   bool filter_allocate_is_gain_;
   ID_TYPE filter_node_size_threshold_;
+  ID_TYPE filter_fixed_node_size_threshold_;
 
   bool filter_conformal_is_smoothen_;
   std::string filter_conformal_smoothen_method_;
@@ -154,7 +155,8 @@ class Config {
   bool navigator_is_gpu_;
   VALUE_TYPE navigator_train_val_split_;
 
-  bool is_profile_;
+  bool to_profile_search_;
+  bool to_profile_filters_;
 };
 
 }

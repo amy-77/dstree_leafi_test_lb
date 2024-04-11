@@ -56,6 +56,7 @@ class Filter {
 //  };
 
   bool is_active() const { return is_active_; }
+  bool is_trained() const { return is_trained_; }
   RESPONSE activate(MODEL_SETTING &model_setting) {
     if (model_setting.model_setting_str != model_setting_ref_.get().model_setting_str) {
       is_trained_ = false;

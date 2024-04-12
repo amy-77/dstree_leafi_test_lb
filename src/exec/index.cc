@@ -1067,8 +1067,6 @@ RESPONSE dstree::Index::profile(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_T
       for (auto child_node : node_to_visit.get()) {
         VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(route_ptr);
 
-        // TODO fix bug: parent LB dist > child LB dist
-        // current workaround: do not early prune
         leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
       }
     }

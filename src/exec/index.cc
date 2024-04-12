@@ -908,6 +908,9 @@ RESPONSE dstree::Index::dump() const {
   if (config_.get().filter_train_num_local_example_ > ofs_buf_size) {
     ofs_buf_size = config_.get().filter_train_num_local_example_;
   }
+  if (ofs_buf_size < 1) {
+    ofs_buf_size = 128;
+  }
   ofs_buf_size *= sizeof(ID_TYPE) * config_.get().series_length_;
   void *ofs_buf = std::malloc(ofs_buf_size);
 
@@ -1017,22 +1020,22 @@ RESPONSE dstree::Index::profile(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_T
 
   ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
 
-  if (config_.get().is_exact_search_) {
-    leaf_min_heap_.push(std::make_tuple(std::ref(*root_), root_->cal_lower_bound_EDsquare(route_ptr)));
+  leaf_min_heap_.push(std::make_tuple(std::ref(*root_), root_->cal_lower_bound_EDsquare(route_ptr)));
 
-    // WARN undefined behaviour
-    std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
-    VALUE_TYPE node2visit_lbdistance;
+  // WARN undefined behaviour
+  std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
+  VALUE_TYPE node2visit_lbdistance;
 
-    while (!leaf_min_heap_.empty()) {
-      std::tie(node_to_visit, node2visit_lbdistance) = leaf_min_heap_.top();
-      leaf_min_heap_.pop();
+  while (!leaf_min_heap_.empty()) {
+    std::tie(node_to_visit, node2visit_lbdistance) = leaf_min_heap_.top();
+    leaf_min_heap_.pop();
 
-      if (node_to_visit.get().is_leaf()) {
-        if (visited_node_counter < config_.get().search_max_nnode_ &&
-            visited_series_counter < config_.get().search_max_nseries_) {
-          VALUE_TYPE nn_dist = node_to_visit.get().search(query_ptr);
+    if (node_to_visit.get().is_leaf()) {
+      if (visited_node_counter < config_.get().search_max_nnode_ &&
+          visited_series_counter < config_.get().search_max_nseries_) {
+        VALUE_TYPE nn_dist = node_to_visit.get().search(query_ptr);
 
+        if (config_.get().require_neurofilter_) {
           VALUE_TYPE predicted_nn_distance = -1;
           if (node_to_visit.get().has_active_filter()) {
             predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
@@ -1046,19 +1049,27 @@ RESPONSE dstree::Index::profile(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_T
                         node_to_visit.get().get_filter().get().get_abs_error_interval());
 //#endif
 #endif
-          answers->check_push_bsf(nn_dist, node_to_visit.get().get_id());
-
-          visited_node_counter += 1;
-          visited_series_counter += node_to_visit.get().get_size();
+        } else {
+#ifdef DEBUG
+//#ifndef DEBUGGED
+          spdlog::debug("profile query {:d} node_i {:d} ({:d}) lb {:.3f} bsf {:.3f} nn {:.3f}",
+                        answers.get()->query_id_, node_to_visit.get().get_id(), visited_node_counter,
+                        node2visit_lbdistance, answers->get_bsf(), nn_dist);
+//#endif
+#endif
         }
-      } else {
-        for (auto child_node : node_to_visit.get()) {
-          VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(route_ptr);
+        answers->check_push_bsf(nn_dist, node_to_visit.get().get_id());
 
-          // TODO fix bug: parent LB dist > child LB dist
-          // current workaround: do not early prune
-          leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
-        }
+        visited_node_counter += 1;
+        visited_series_counter += node_to_visit.get().get_size();
+      }
+    } else {
+      for (auto child_node : node_to_visit.get()) {
+        VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(route_ptr);
+
+        // TODO fix bug: parent LB dist > child LB dist
+        // current workaround: do not early prune
+        leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
       }
     }
   }

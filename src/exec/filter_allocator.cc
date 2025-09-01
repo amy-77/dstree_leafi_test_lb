@@ -674,6 +674,10 @@ RESPONSE dstree::Allocator::reassign() {
                    filter_node_size_threshold, node_size_threshold_, config_.get().filter_fixed_node_size_threshold_);
 
       for (auto &filter_info : filter_infos_) {
+//        spdlog::debug("allocator reassign node_.get_size {:d}, has_trained_filter {:d}",
+//                      filter_info.node_.get().get_size(),
+//                      filter_info.node_.get().has_trained_filter());
+
         if (filter_info.node_.get().get_size() >= filter_node_size_threshold
             && filter_info.node_.get().has_trained_filter()
             && allocated_gpu_memory_mb + filter_info.model_setting.get().gpu_mem_mb <= available_gpu_memory_mb_) {
@@ -692,6 +696,9 @@ RESPONSE dstree::Allocator::reassign() {
                allocated_filters_count, allocated_gpu_memory_mb, available_gpu_memory_mb_);
   return SUCCESS;
 }
+
+
+
 
 RESPONSE dstree::Allocator::set_confidence_from_recall() {
 #ifdef DEBUG

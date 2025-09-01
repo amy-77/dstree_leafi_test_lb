@@ -342,28 +342,10 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
                               ID_TYPE &visited_series_counter) const {
   const VALUE_TYPE *db_series_ptr = buffer_.get().get_first_series_ptr();
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-  if (db_series_ptr == nullptr) {
-    spdlog::debug("query {:d} node {:d} ({:d}) series null ptr",
-                  answer.query_id_, id_, visited_node_counter);
-  }
-
-  ID_TYPE series_i = 0;
-#endif
-#endif
 
   while (db_series_ptr != nullptr) {
     VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_.get().series_length_);
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-    spdlog::debug("query {:d} node {:d} ({:d}) series {:d}/{:d} dist {:.3f} bsf {:.3f}",
-                  answer.query_id_, id_, visited_node_counter, series_i, nseries_,
-                  distance, answer.get_bsf());
-    series_i += 1;
-#endif
-#endif
 
     if (answer.is_bsf(distance)) {
       answer.push_bsf(distance, id_);
@@ -384,6 +366,9 @@ RESPONSE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
   return SUCCESS;
 }
 
+
+
+
 VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
                                 VALUE_TYPE *m256_fetch_cache,
                                 VALUE_TYPE bsf_distance) const {
@@ -393,14 +378,6 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
   while (db_series_ptr != nullptr) {
     VALUE_TYPE distance = upcite::cal_EDsquare(db_series_ptr, query_series_ptr, config_.get().series_length_);
 
-    // TODO resolve the conflict between multithreading and SIMD
-//    if (bsf_distance > 0) {
-//      distance = upcite::cal_early_EDsquare_SIMD_8(
-//          db_series_ptr, query_series_ptr, config_.get().series_length_, m256_fetch_cache, bsf_distance);
-//    } else {
-//      distance = upcite::cal_EDsquare_SIMD_8(
-//          db_series_ptr, query_series_ptr, config_.get().series_length_, m256_fetch_cache);
-//    }
 
     if (distance < local_bsf) {
       local_bsf = distance;
@@ -413,6 +390,9 @@ VALUE_TYPE dstree::Node::search(const VALUE_TYPE *query_series_ptr,
 
   return local_bsf;
 }
+
+
+
 
 VALUE_TYPE dstree::Node::search_mt(const VALUE_TYPE *query_series_ptr,
                                    Answers &answer,
@@ -603,8 +583,8 @@ RESPONSE dstree::Node::load(void *ifs_buf,
   }
 
 //  if (filter_ != nullptr) {
-//    spdlog::debug("load node {:d} filter {:d} size {:d} {:d}",
-//                  id_, filter_.get()->get_id(), nseries_, buffer_.get().size());
+//    spdlog::debug("load node {:d} filter {:d} or {:d} (trained {:b}) size {:d} {:d}",
+//                  id_, filter_.get()->get_id(), filter_id, filter_.get()->is_trained(), nseries_, buffer_.get().size());
 //  } else {
 //    spdlog::debug("load node {:d} size {:d} {:d}",
 //                  id_, nseries_, buffer_.get().size());

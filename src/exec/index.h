@@ -47,7 +47,8 @@ class Index {
   RESPONSE load();
 
   RESPONSE search(bool is_profile=false);
-  RESPONSE search(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TYPE *sketch_ptr = nullptr);
+  RESPONSE search(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TYPE *sketch_ptr, 
+                  ID_TYPE &total_lb_pruned_series, ID_TYPE &total_visited_series);
   RESPONSE search_navigated(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr = nullptr);
 
  private:

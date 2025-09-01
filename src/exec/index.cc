@@ -10,6 +10,7 @@
 #include <random>
 #include <algorithm>
 #include <immintrin.h>
+#include <chrono>
 
 #include <spdlog/spdlog.h>
 #include <boost/filesystem.hpp>
@@ -116,7 +117,8 @@ RESPONSE dstree::Index::insert(ID_TYPE batch_series_id) {
 RESPONSE dstree::Index::filter_initialize(dstree::Node &node,
                                           ID_TYPE *filter_id) {
   if (node.is_leaf()) {
-    node.add_filter(*filter_id, filter_train_query_tsr_);
+//    node.add_filter(*filter_id, filter_train_query_tsr_);
+    node.add_filter(node.get_id(), filter_train_query_tsr_);
 
     filter_cache_.push(node.get_filter());
     *filter_id += 1;
@@ -144,12 +146,13 @@ RESPONSE dstree::Index::filter_deactivate(dstree::Node &node) {
 }
 
 RESPONSE dstree::Index::filter_collect() {
-  auto *m256_fetch_cache = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), sizeof(VALUE_TYPE) * 8));
 
+  auto *m256_fetch_cache = static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), sizeof(VALUE_TYPE) * 8));
   for (ID_TYPE query_id = 0; query_id < config_.get().filter_train_nexample_; ++query_id) {
     const VALUE_TYPE *series_ptr = filter_train_query_ptr_ + config_.get().series_length_ * query_id;
 
     ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
+
     auto answer = std::make_shared<dstree::Answers>(config_.get().n_nearest_neighbor_, query_id);
     std::reference_wrapper<dstree::Node> resident_node = std::ref(*root_);
 
@@ -158,6 +161,7 @@ RESPONSE dstree::Index::filter_collect() {
     }
 
     VALUE_TYPE local_nn_distance = resident_node.get().search(series_ptr, m256_fetch_cache);
+    // qyl： 感觉是个bug，这里bsf应该保存访问当前节点之前的minbsf
     resident_node.get().push_global_example(answer->get_bsf(), local_nn_distance, 0);
 
     visited_node_counter += 1;
@@ -186,8 +190,8 @@ RESPONSE dstree::Index::filter_collect() {
       if (node_to_visit.get().is_leaf()) {
         if (node_to_visit.get().get_id() != resident_node.get().get_id()) {
           local_nn_distance = node_to_visit.get().search(series_ptr, m256_fetch_cache);
-          node_to_visit.get().push_global_example(answer->get_bsf(), local_nn_distance,
-                                                  node2visit_lbdistance);
+          // qyl： 感觉是个bug，这里bsf应该保存访问当前节点之前的minbsf
+          node_to_visit.get().push_global_example(answer->get_bsf(), local_nn_distance, node2visit_lbdistance);
 
           visited_node_counter += 1;
           visited_series_counter += node_to_visit.get().get_size();
@@ -208,20 +212,15 @@ RESPONSE dstree::Index::filter_collect() {
       }
     }
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-    MALAT_LOG(logger_.get().logger, trivial::info) << boost::format(
-          "filter query %d visited %d nodes %d series")
-          % query_id
-          % visited_node_counter
-          % visited_series_counter;
-#endif
-#endif
   }
 
   std::free(m256_fetch_cache);
   return SUCCESS;
 }
+
+
+
+
 
 struct SearchCache {
   SearchCache(ID_TYPE thread_id,
@@ -267,10 +266,10 @@ struct SearchCache {
   pthread_mutex_t *log_mutex_;
 };
 
+
+
+
 void search_thread_F(const SearchCache &search_cache) {
-  // aligned_alloc within thread might cause a "corrupted size vs. prev_size" glibc error
-  // https://stackoverflow.com/questions/49628615/understanding-corrupted-size-vs-prev-size-glibc-error
-//  auto m256_fetch_cache = std::unique_ptr<VALUE_TYPE>(static_cast<VALUE_TYPE *>(aligned_alloc(sizeof(__m256), 8)));
 
   // WARN undefined behaviour
   std::reference_wrapper<dstree::Node> node_to_visit = std::ref(*(dstree::Node *) nullptr);
@@ -295,18 +294,16 @@ void search_thread_F(const SearchCache &search_cache) {
     pthread_mutex_unlock(search_cache.answer_mutex_);
 
     if (node_to_visit.get().has_filter()) {
-      VALUE_TYPE local_nn_distance = node_to_visit.get().search_mt(
-          search_cache.query_series_ptr_, *search_cache.answer_, search_cache.answer_mutex_);
+      VALUE_TYPE local_nn_distance = node_to_visit.get().search_mt(search_cache.query_series_ptr_, *search_cache.answer_, search_cache.answer_mutex_);
 
       node_to_visit.get().push_global_example(global_bsf, local_nn_distance, node2visit_lbdistance);
-
       pthread_mutex_lock(search_cache.log_mutex_);
       *search_cache.visited_node_counter_ += 1;
       *search_cache.visited_series_counter_ += node_to_visit.get().get_size();
       pthread_mutex_unlock(search_cache.log_mutex_);
+
     } else if (node2visit_lbdistance <= global_bsf) {
-      VALUE_TYPE local_nn_distance = node_to_visit.get().search_mt(
-          search_cache.query_series_ptr_, *search_cache.answer_, search_cache.answer_mutex_);
+      VALUE_TYPE local_nn_distance = node_to_visit.get().search_mt(search_cache.query_series_ptr_, *search_cache.answer_, search_cache.answer_mutex_);
 
       pthread_mutex_lock(search_cache.log_mutex_);
       *search_cache.visited_node_counter_ += 1;
@@ -315,6 +312,8 @@ void search_thread_F(const SearchCache &search_cache) {
     }
   }
 }
+
+
 
 RESPONSE dstree::Index::filter_collect_mthread() {
   auto *m256_fetch_cache = static_cast<VALUE_TYPE *>(aligned_alloc(
@@ -509,6 +508,8 @@ struct TrainCache {
   pthread_mutex_t *filter_cache_mutex_;
 };
 
+
+
 void train_thread_F(TrainCache &train_cache) {
   at::cuda::setCurrentCUDAStream(train_cache.stream_);
   at::cuda::CUDAStreamGuard guard(train_cache.stream_); // compiles with libtorch-gpu
@@ -531,6 +532,7 @@ void train_thread_F(TrainCache &train_cache) {
     }
   }
 }
+
 
 RESPONSE dstree::Index::filter_train_mthread() {
   // TODO enable multithread train on CPU
@@ -558,23 +560,11 @@ RESPONSE dstree::Index::filter_train_mthread() {
     }
   }
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-  spdlog::debug("indexing filters.size = {:d}", filters.size());
-#endif
-#endif
 
   std::vector<std::unique_ptr<TrainCache>> train_caches;
 
   for (ID_TYPE thread_id = 0; thread_id < config_.get().filter_train_nthread_; ++thread_id) {
     at::cuda::CUDAStream new_stream = at::cuda::getStreamFromPool(false, config_.get().filter_device_id_);
-
-    spdlog::info("train thread {:d} stream id = {:d}, query = {:d}, priority = {:d}",
-                 thread_id,
-                 static_cast<ID_TYPE>(new_stream.id()),
-                 static_cast<ID_TYPE>(new_stream.query()),
-                 static_cast<ID_TYPE>(new_stream.priority())); // compiles with libtorch-gpu
-
     train_caches.emplace_back(std::make_unique<TrainCache>(thread_id,
                                                            std::move(new_stream),
                                                            std::ref(filters),
@@ -593,6 +583,10 @@ RESPONSE dstree::Index::filter_train_mthread() {
 
   return SUCCESS;
 }
+
+
+
+
 
 RESPONSE dstree::Index::train(bool is_retrain) {
   // local query generation is called after collecting global results
@@ -892,13 +886,12 @@ RESPONSE dstree::Index::load() {
       }
     }
   }
-
   if (config_.get().navigator_is_learned_) {
     train();
   }
-
   return SUCCESS;
 }
+
 
 RESPONSE dstree::Index::dump() const {
   ID_TYPE ofs_buf_size = config_.get().filter_train_nexample_;
@@ -920,29 +913,24 @@ RESPONSE dstree::Index::dump() const {
   return SUCCESS;
 }
 
+
+
 RESPONSE dstree::Index::search(bool is_profile) {
   if (!fs::exists(config_.get().query_filepath_)) {
     spdlog::error("query filepath {:s} does not exist", config_.get().query_filepath_);
-
     return FAILURE;
   }
-
   std::ifstream query_fin(config_.get().query_filepath_, std::ios::in | std::ios::binary);
   if (!query_fin.good()) {
     spdlog::error("query filepath {:s} cannot open", config_.get().query_filepath_);
-
     return FAILURE;
   }
-
-  auto query_nbytes =
-      static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().query_nseries_;
+  auto query_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().series_length_ * config_.get().query_nseries_;
   auto query_buffer = static_cast<VALUE_TYPE *>(std::malloc(query_nbytes));
-
   query_fin.read(reinterpret_cast<char *>(query_buffer), query_nbytes);
 
   if (query_fin.fail()) {
     spdlog::error("cannot read {:d} bytes from {:s}", query_nbytes, config_.get().query_filepath_);
-
     return FAILURE;
   }
 
@@ -950,58 +938,89 @@ RESPONSE dstree::Index::search(bool is_profile) {
   if (config_.get().is_sketch_provided_) {
     if (!fs::exists(config_.get().query_sketch_filepath_)) {
       spdlog::error("query sketch filepath {:s} does not exist", config_.get().query_sketch_filepath_);
-
       return FAILURE;
     }
 
     std::ifstream query_sketch_fin(config_.get().query_sketch_filepath_, std::ios::in | std::ios::binary);
     if (!query_fin.good()) {
       spdlog::error("query sketch filepath {:s} cannot open", config_.get().query_sketch_filepath_);
-
       return FAILURE;
     }
 
-    auto query_sketch_nbytes =
-        static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().sketch_length_ * config_.get().query_nseries_;
+    auto query_sketch_nbytes = static_cast<ID_TYPE>(sizeof(VALUE_TYPE)) * config_.get().sketch_length_ * config_.get().query_nseries_;
     query_sketch_buffer = static_cast<VALUE_TYPE *>(std::malloc(query_sketch_nbytes));
-
     query_sketch_fin.read(reinterpret_cast<char *>(query_sketch_buffer), query_sketch_nbytes);
 
     if (query_sketch_fin.fail()) {
       spdlog::error("cannot read {:d} bytes from {:s}", query_nbytes, config_.get().query_filepath_);
-
       return FAILURE;
     }
   }
 
   //
   // get confidence intervals based on the required recall, during search
-  if (config_.get().require_neurofilter_ && config_.get().filter_is_conformal_
-      && config_.get().filter_conformal_adjust_confidence_by_recall_) {
+  if (config_.get().require_neurofilter_ && config_.get().filter_is_conformal_  && config_.get().filter_conformal_adjust_confidence_by_recall_) {
     allocator_.get()->set_confidence_from_recall();
   }
 
+  // 添加累积统计变量
+  ID_TYPE total_lb_pruned_series = 0;
+  ID_TYPE total_visited_series = 0;
+  printf("is_profile: %d\n", is_profile);
   VALUE_TYPE *series_ptr, *sketch_ptr = nullptr;
+
   for (ID_TYPE query_id = 0; query_id < config_.get().query_nseries_; ++query_id) {
+    ID_TYPE local_nfpruned_series_counter_lb = 0;
+    ID_TYPE local_visited_series_counter_total = 0;
     series_ptr = query_buffer + config_.get().series_length_ * query_id;
 
     if (config_.get().is_sketch_provided_) {
       sketch_ptr = query_sketch_buffer + config_.get().sketch_length_ * query_id;
     }
-
+    // 开始计时
+    auto start_time = std::chrono::high_resolution_clock::now();
+    // printf("is_profile: %d\n", is_profile);
     if (is_profile) {
       profile(query_id, series_ptr, sketch_ptr);
     } else {
       if (config_.get().navigator_is_learned_) {
         search_navigated(query_id, series_ptr, sketch_ptr);
       } else {
-        search(query_id, series_ptr, sketch_ptr);
+        search(query_id, series_ptr, sketch_ptr, local_nfpruned_series_counter_lb, local_visited_series_counter_total);
       }
     }
+    total_lb_pruned_series += local_nfpruned_series_counter_lb;
+    total_visited_series += local_visited_series_counter_total;
+    // 结束计时并输出结果
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    
+
   }
+  
+  // 计算并输出平均lower bound剪枝率
+  if (total_visited_series > 0 && !is_profile && !config_.get().navigator_is_learned_) {
+    double lb_pruning_rate = static_cast<double>(total_lb_pruned_series) / static_cast<double>(total_visited_series);
+    printf("Overall Lower Bound Pruning Statistics:\n");
+    printf("Total series that could be visited: %ld\n", total_visited_series);
+    printf("Total series pruned by lower bound: %ld\n", total_lb_pruned_series);
+    printf("Average lower bound pruning rate: %.4f (%.2f%%)\n", lb_pruning_rate, lb_pruning_rate * 100.0);
+    
+    spdlog::info("Overall Lower Bound Pruning Statistics:");
+    spdlog::info("Total series that could be visited: {:ld}", total_visited_series);
+    spdlog::info("Total series pruned by lower bound: {:ld}", total_lb_pruned_series);
+    spdlog::info("Average lower bound pruning rate: {:.4f} ({:.2f}%)", lb_pruning_rate, lb_pruning_rate * 100.0);
+  }
+
+
+
 
   return SUCCESS;
 }
+
+
+
 
 RESPONSE dstree::Index::profile(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TYPE *sketch_ptr) {
   VALUE_TYPE *route_ptr = query_ptr;
@@ -1033,7 +1052,10 @@ RESPONSE dstree::Index::profile(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_T
     if (node_to_visit.get().is_leaf()) {
       if (visited_node_counter < config_.get().search_max_nnode_ &&
           visited_series_counter < config_.get().search_max_nseries_) {
-        VALUE_TYPE nn_dist = node_to_visit.get().search(query_ptr);
+        VALUE_TYPE nn_dist = constant::MAX_VALUE;
+        if (config_.get().to_profile_search_exhausting_ || answers->is_bsf(node2visit_lbdistance)) {
+          nn_dist = node_to_visit.get().search(query_ptr);
+        }
 
         if (config_.get().require_neurofilter_) {
           VALUE_TYPE predicted_nn_distance = -1;
@@ -1098,40 +1120,49 @@ RESPONSE dstree::Index::profile(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_T
   return SUCCESS;
 }
 
-RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TYPE *sketch_ptr) {
-  VALUE_TYPE *route_ptr = query_ptr;
+
+
+RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr,
+                               ID_TYPE &local_nfpruned_series_counter_lb, ID_TYPE &local_visited_series_counter_total) {
+  VALUE_TYPE *route_ptr = series_ptr;
   if (config_.get().is_sketch_provided_) {
     route_ptr = sketch_ptr;
   }
-
   auto answers = std::make_shared<dstree::Answers>(config_.get().n_nearest_neighbor_, query_id);
-
   if (config_.get().require_neurofilter_) {
-    filter_query_tsr_ = torch::from_blob(query_ptr,
-                                         {1, config_.get().series_length_},
-                                         torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
+    filter_query_tsr_ = torch::from_blob(series_ptr, {1, config_.get().series_length_}, torch::TensorOptions().dtype(TORCH_VALUE_TYPE));
     filter_query_tsr_ = filter_query_tsr_.to(*device_);
   }
-
   std::reference_wrapper<dstree::Node> resident_node = std::ref(*root_);
-
   while (!resident_node.get().is_leaf()) {
     resident_node = resident_node.get().route(route_ptr);
   }
-
-#ifdef DEBUG
-//#ifndef DEBUGGED
-  spdlog::debug("query {:d} resident node {:d} size {:d}",
-                answers.get()->query_id_,
-                resident_node.get().get_id(),
-                resident_node.get().get_size());
-//#endif
-#endif
-
+  // visited_node_counter 记录实际搜索的节点数和series数
   ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
+  // 记录的是filter剪枝
   ID_TYPE nfpruned_node_counter = 0, nfpruned_series_counter = 0;
+  // 记录的是LB剪枝
+  ID_TYPE nfpruned_node_counter_lb = 0;
+  // 记录的是总的序列数 】
+  ID_TYPE visited_node_counter_total = 0;
 
-  resident_node.get().search(query_ptr, *answers, visited_node_counter, visited_series_counter);
+  // 添加搜索次数统计器
+  int search_count = 0;
+  // 记录搜索居民节点的时间 - 开始
+  auto resident_search_start = std::chrono::high_resolution_clock::now();
+  resident_node.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+  nfpruned_node_counter_lb += 1;
+  local_visited_series_counter_total += resident_node.get().get_size();
+  
+  search_count++; // 增加搜索计数
+  // 记录搜索居民节点的时间 - 结束
+  auto resident_search_end = std::chrono::high_resolution_clock::now();
+  auto resident_search_duration = std::chrono::duration_cast<std::chrono::microseconds>(resident_search_end - resident_search_start);
+  
+  // printf("Node %d search time: %ld μs (size: %d, resident node - navigated)\n", 
+  //        resident_node.get().get_id(), 
+  //        resident_search_duration.count(),
+  //        resident_node.get().get_size());
 
   if (config_.get().is_exact_search_) {
     leaf_min_heap_.push(std::make_tuple(std::ref(*root_), root_->cal_lower_bound_EDsquare(route_ptr)));
@@ -1144,126 +1175,104 @@ RESPONSE dstree::Index::search(ID_TYPE query_id, VALUE_TYPE *query_ptr, VALUE_TY
       std::tie(node_to_visit, node2visit_lbdistance) = leaf_min_heap_.top();
       leaf_min_heap_.pop();
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-      spdlog::debug("query {:d} node_i {:d} dist {:.3f} bsf {:.3f}",
-                    answers.get()->query_id_,
-                    node_to_visit.get().get_id(),
-                    node2visit_lbdistance,
-                    answers->get_bsf());
-#endif
-#endif
-
       if (node_to_visit.get().is_leaf()) {
-        if (visited_node_counter < config_.get().search_max_nnode_ &&
-            visited_series_counter < config_.get().search_max_nseries_) {
+        // printf("config_.get().search_max_nnode_: %d, config_.get().search_max_nseries_: %d\n", config_.get().search_max_nnode_, config_.get().search_max_nseries_);
+        // if (visited_node_counter < config_.get().search_max_nnode_ && visited_series_counter < config_.get().search_max_nseries_) {
           if (node_to_visit.get().get_id() != resident_node.get().get_id()) {
-#ifdef DEBUG
-#ifndef DEBUGGED
-            spdlog::debug("query {:d} node_i {:d} ({:d}) lb {:.3f} bsf {:.3f}",
-                          answers.get()->query_id_, node_to_visit.get().get_id(), visited_node_counter,
-                          node2visit_lbdistance, answers->get_bsf());
-#endif
-#endif
+            // 判断lower bound是否小于等于bsf
+            if (answers->is_bsf(node2visit_lbdistance)) {
+              // if (node_to_visit.get().has_active_filter()) {
+              //   VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
 
-            if (config_.get().examine_ground_truth_ || answers->is_bsf(node2visit_lbdistance)) {
-              if (node_to_visit.get().has_active_filter()) {
-                VALUE_TYPE predicted_nn_distance = node_to_visit.get().filter_infer(filter_query_tsr_);
+              //   if (predicted_nn_distance > answers->get_bsf()) {
+              //     nfpruned_node_counter += 1;
+              //     nfpruned_series_counter += node_to_visit.get().get_size();
 
-#ifdef DEBUG
-#ifndef DEBUGGED
-                spdlog::debug("query {:d} node_i {:d} ({:d}) lb {:.3f} bsf {:.3f} pred {:.3f}",
-                              answers.get()->query_id_,
-                              node_to_visit.get().get_id(), visited_node_counter,
-                              node2visit_lbdistance, answers->get_bsf(), predicted_nn_distance);
-#endif
-#endif
+              //   } else {
+              //     // 记录搜索单个节点的时间 - 开始
+              //     auto node_search_start = std::chrono::high_resolution_clock::now();
+              //     node_to_visit.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+              //     search_count++; // 增加搜索计数
+              //     // 记录搜索单个节点的时间 - 结束
+              //     auto node_search_end = std::chrono::high_resolution_clock::now();
+              //     auto node_search_duration = std::chrono::duration_cast<std::chrono::microseconds>(node_search_end - node_search_start);
+                  
+              //     // printf("Node %d search time: %ld μs (size: %d, with neurofilter)\n", 
+              //     //        node_to_visit.get().get_id(), 
+              //     //        node_search_duration.count(),
+              //     //        node_to_visit.get().get_size());
+              //     spdlog::info("Node {} search time: {} μs (size: {}, with neurofilter)", 
+              //             node_to_visit.get().get_id(), 
+              //             node_search_duration.count(),
+              //             node_to_visit.get().get_size());
+              //   }
 
-                if (predicted_nn_distance > answers->get_bsf()) {
-                  nfpruned_node_counter += 1;
-                  nfpruned_series_counter += node_to_visit.get().get_size();
-                } else {
-                  node_to_visit.get().search(query_ptr, *answers, visited_node_counter,
-                                             visited_series_counter);
-                }
-              } else {
-                node_to_visit.get().search(query_ptr, *answers, visited_node_counter,
-                                           visited_series_counter);
-              }
+              // } else {
+                // 记录搜索单个节点的时间 - 开始
+                auto node_search_start = std::chrono::high_resolution_clock::now();
+                node_to_visit.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+                search_count++; // 增加搜索计数
+                
+                // 记录搜索单个节点的时间 - 结束
+                auto node_search_end = std::chrono::high_resolution_clock::now();
+                auto node_search_duration = std::chrono::duration_cast<std::chrono::microseconds>(node_search_end - node_search_start);
+                
+          
+              // }
+
+            } else {
+              // 可以用lower bound 剪枝
+              nfpruned_node_counter_lb += 1;
+              local_nfpruned_series_counter_lb += node_to_visit.get().get_size();
+              // printf("Node %d is pruned\n", node_to_visit.get().get_id());
             }
+            //记录总的访问序列个数（不考虑任何剪枝）
+            visited_node_counter += 1;
+            local_visited_series_counter_total += node_to_visit.get().get_size();
           }
-        }
+
       } else {
         for (auto child_node : node_to_visit.get()) {
           VALUE_TYPE child_lower_bound_EDsquare = child_node.get().cal_lower_bound_EDsquare(route_ptr);
-
-          // TODO fix bug: parent LB dist > child LB dist
           // current workaround: do not early prune
           leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
-
-//          if (config_.get().examine_ground_truth_ || answers->is_bsf(child_lower_bound_EDsquare)) {
-//            leaf_min_heap_.push(std::make_tuple(child_node, child_lower_bound_EDsquare));
-//          } else {
-//#ifdef DEBUG
-////#ifndef DEBUGGED
-//            spdlog::debug("query {:d} node_i {:d} ({:b}) dist {:.3f} bsf {:.3f}",
-//                          answers.get()->query_id_,
-//                          child_node.get().get_id(),
-//                          child_node.get().is_leaf(),
-//                          child_lower_bound_EDsquare,
-//                          answers->get_bsf());
-//
-//            if (!child_node.get().is_leaf()) {
-//              for (auto debug_child_node : child_node.get()) {
-//                VALUE_TYPE debug_EDsquare = debug_child_node.get().cal_lower_bound_EDsquare(route_ptr);
-//
-//                spdlog::debug("query {:d} node_i {:d} ({:d}, {:b}) dist {:.3f} bsf {:.3f}",
-//                              answers.get()->query_id_,
-//                              debug_child_node.get().get_id(),
-//                              child_node.get().get_id(),
-//                              debug_child_node.get().is_leaf(),
-//                              debug_EDsquare,
-//                              answers->get_bsf());
-//              }
-//            }
-////#endif
-//#endif
-//          }
         }
       }
     }
   }
 
-  spdlog::info("query {:d} visited {:d} nodes {:d} series",
-               query_id, visited_node_counter, visited_series_counter);
+  spdlog::info("query {:d} local_visited_series_counter_total {:d}, local_nfpruned_series_counter_lb {:d}",
+               query_id, local_visited_series_counter_total, local_nfpruned_series_counter_lb);
+  printf("query %d local_visited_series_counter_total %d, local_nfpruned_series_counter_lb %d\n",
+               query_id, local_visited_series_counter_total, local_nfpruned_series_counter_lb);
+  // if (config_.get().require_neurofilter_) {
+  //   spdlog::info("query {:d} neurofilters pruned {:d} nodes {:d} series",
+  //                query_id, nfpruned_node_counter, nfpruned_series_counter);
+  // }
+  spdlog::info("filter pruned {:d} nodes {:d} series", nfpruned_node_counter, nfpruned_series_counter);
+  spdlog::info("lb pruned {:d} nodes {:d} series", nfpruned_node_counter_lb, local_nfpruned_series_counter_lb);
+  spdlog::info("actual search {:d} nodes {:d} series", visited_node_counter, visited_series_counter);
+   
 
-  if (config_.get().require_neurofilter_) {
-    spdlog::info("query {:d} neurofilters pruned {:d} nodes {:d} series",
-                 query_id, nfpruned_node_counter, nfpruned_series_counter);
-  }
+  // 输出总的搜索次数
+  // printf("Query %d total search count: %d\n", query_id, search_count);
+  // spdlog::info("Query {:d} total search count: {:d}", query_id, search_count);
 
-  ID_TYPE nnn_to_return = config_.get().n_nearest_neighbor_;
-
-  while (!answers->empty()) {
-    auto answer = answers->pop_answer();
-
-    if (answer.node_id_ > 0) {
-      spdlog::info("query {:d} nn {:d} = {:.3f}, node {:d}",
-                   query_id, nnn_to_return, answer.nn_dist_, answer.node_id_);
-    } else {
-      spdlog::info("query {:d} nn {:d} = {:.3f}",
-                   query_id, nnn_to_return, answer.nn_dist_);
-    }
-
-    nnn_to_return -= 1;
-  }
-
-  if (nnn_to_return > 0) {
-    return FAILURE;
-  }
+  // 累积单个query的统计数据到总计数器
+  // if (nfpruned_series_counter_lb != nullptr) {
+  //   *nfpruned_series_counter_lb += local_nfpruned_series_counter_lb;
+  // }
+  // if (visited_series_counter_total != nullptr) {
+  //   *visited_series_counter_total += local_visited_series_counter_total;
+  // }
 
   return SUCCESS;
 }
+
+
+
+
+
 
 RESPONSE dstree::Index::search_navigated(ID_TYPE query_id, VALUE_TYPE *series_ptr, VALUE_TYPE *sketch_ptr) {
   VALUE_TYPE *route_ptr = series_ptr;
@@ -1288,7 +1297,23 @@ RESPONSE dstree::Index::search_navigated(ID_TYPE query_id, VALUE_TYPE *series_pt
   ID_TYPE visited_node_counter = 0, visited_series_counter = 0;
   ID_TYPE nfpruned_node_counter = 0, nfpruned_series_counter = 0;
 
+  // 添加搜索次数统计器
+  int search_count = 0;
+
+  // 记录搜索居民节点的时间 - 开始
+  auto resident_search_start = std::chrono::high_resolution_clock::now();
+  
   resident_node.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+  search_count++; // 增加搜索计数
+  
+  // 记录搜索居民节点的时间 - 结束
+  auto resident_search_end = std::chrono::high_resolution_clock::now();
+  auto resident_search_duration = std::chrono::duration_cast<std::chrono::microseconds>(resident_search_end - resident_search_start);
+  
+  printf("Node %d search time: %ld μs (size: %d, resident node - navigated)\n", 
+         resident_node.get().get_id(), 
+         resident_search_duration.count(),
+         resident_node.get().get_size());
 
   if (config_.get().is_exact_search_) {
     auto node_prob = navigator_->infer(filter_query_tsr_);
@@ -1356,21 +1381,24 @@ RESPONSE dstree::Index::search_navigated(ID_TYPE query_id, VALUE_TYPE *series_pt
       ID_TYPE leaf_i = std::get<0>(node_pos_probs[prob_i]);
       auto node_to_visit = leaf_nodes_[leaf_i];
 
-//#ifdef DEBUG
-////#ifndef DEBUGGED
-//      spdlog::debug("query {:d} leaf_i {:d} ({:d}) dist {:.3f} prob {:.3f} ({:.3f}) bsf {:.3f}",
-//                    answers.get()->query_id_,
-//                    leaf_i, navigator_->get_id_from_pos(leaf_i),
-//                    node_distances[leaf_i],
-//                    std::get<1>(node_pos_probs[prob_i]), node_prob[leaf_i],
-//                    answers->get_bsf());
-////#endif
-//#endif
 
       if (visited_node_counter < config_.get().search_max_nnode_ &&
           visited_series_counter < config_.get().search_max_nseries_) {
         if (config_.get().examine_ground_truth_ || answers->is_bsf(node_distances[leaf_i])) {
+          // 记录搜索单个节点的时间 - 开始
+          auto node_search_start = std::chrono::high_resolution_clock::now();
+          
           node_to_visit.get().search(series_ptr, *answers, visited_node_counter, visited_series_counter);
+          search_count++; // 增加搜索计数
+          
+          // 记录搜索单个节点的时间 - 结束
+          auto node_search_end = std::chrono::high_resolution_clock::now();
+          auto node_search_duration = std::chrono::duration_cast<std::chrono::microseconds>(node_search_end - node_search_start);
+          
+          printf("Node %d search time: %ld μs (size: %d, navigated search)\n", 
+                 node_to_visit.get().get_id(), 
+                 node_search_duration.count(),
+                 node_to_visit.get().get_size());
         }
       }
     }
@@ -1378,6 +1406,11 @@ RESPONSE dstree::Index::search_navigated(ID_TYPE query_id, VALUE_TYPE *series_pt
 
   spdlog::info("query {:d} visited {:d} nodes {:d} series",
                query_id, visited_node_counter, visited_series_counter);
+
+  if (config_.get().require_neurofilter_) {
+    spdlog::info("query {:d} neurofilters pruned {:d} nodes {:d} series",
+                 query_id, nfpruned_node_counter, nfpruned_series_counter);
+  }
 
   ID_TYPE nnn_to_return = config_.get().n_nearest_neighbor_;
 

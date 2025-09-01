@@ -5,6 +5,8 @@
 
 #include "split.h"
 
+#include <fstream>
+
 namespace dstree = upcite::dstree;
 
 ID_TYPE dstree::Split::route(VALUE_TYPE value) const {

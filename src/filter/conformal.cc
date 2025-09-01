@@ -6,6 +6,7 @@
 #include "conformal.h"
 
 #include <algorithm>
+#include <fstream>
 
 #include "spdlog/spdlog.h"
 
@@ -31,16 +32,16 @@ upcite::ConformalRegressor::ConformalRegressor(std::string core_type_str,
 
 RESPONSE upcite::ConformalRegressor::fit(std::vector<ERROR_TYPE> &residuals) {
   alphas_.assign(residuals.begin(), residuals.end());
-  for (auto &residual : alphas_) { residual = residual < 0 ? -residual : residual; }
+  for (auto &alpha : alphas_) { alpha = alpha < 0 ? -alpha : alpha; }
 
-  std::sort(alphas_.begin(), alphas_.end()); //non-decreasing
+  std::sort(alphas_.begin(), alphas_.end()); // non-decreasing
 
   if (core_ == DISCRETE) {
     is_fitted_ = true;
     is_trial_ = false;
 
     abs_error_i_ = static_cast<ID_TYPE>(static_cast<VALUE_TYPE>(alphas_.size()) * confidence_level_);
-    alpha_ = alphas_[abs_error_i_];
+    alpha_ = alphas_[abs_error_i_]; // suspicious for a segfault
   } else { // core_ == SPLINE
     // fit later with recalls as input
     is_fitted_ = false;
@@ -94,7 +95,8 @@ upcite::INTERVAL upcite::ConformalRegressor::predict(VALUE_TYPE y_hat,
 
       confidence_level_ = confidence_level;
     }
-
+    // printf("y_hat: %f, alpha: %f\n", y_hat, alpha_);
+    // printf("interval: %f, %f\n", y_hat - alpha_, y_hat + alpha_);
     return {y_hat - alpha_, y_hat + alpha_};
   } else if (is_trial_) {
     return {y_hat - alpha_, y_hat + alpha_};

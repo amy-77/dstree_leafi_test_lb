@@ -9,6 +9,8 @@
 #include <chrono>
 #include <random>
 #include <iostream>
+#include <csignal>
+#include <fstream>
 
 #include <boost/filesystem.hpp>
 #include <torch/data/example.h>
@@ -67,6 +69,15 @@ dstree::Filter::Filter(dstree::Config &config,
   }
 }
 
+//void sigfaultHandler(int signal) {
+//  if (signal == SIGSEGV) {
+//    spdlog::error("Segmentation fault (signal {:s}) caught.", signal);
+//  } else {
+//    spdlog::error("Unexpected signal ({:s}) caught.", signal);
+//    std::exit(signal); // Exit the program
+//  }
+//}
+
 RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_runtime_stat) {
   ID_TYPE num_conformal_examples;
 
@@ -76,7 +87,7 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_run
 
     num_conformal_examples = num_global_valid_examples;
   } else {
-    if (config_.get().filter_train_num_global_example_ > 0 && config_.get().filter_train_num_local_example_) {
+    if (config_.get().filter_train_num_global_example_ > 0 && config_.get().filter_train_num_local_example_ > 0) {
       ID_TYPE num_global_train_examples =
           config_.get().filter_train_num_global_example_ * config_.get().filter_train_val_split_;
       ID_TYPE num_global_valid_examples = config_.get().filter_train_num_global_example_ - num_global_train_examples;
@@ -110,14 +121,14 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_run
     VALUE_TYPE max_diff = constant::MIN_VALUE, mean_diff = 0, std_diff = 0;
     ID_TYPE num_diff = 0;
 
-    for (ID_TYPE i = 0; i < num_conformal_examples; ++i) {
+    for (ID_TYPE conformal_i = 0; conformal_i < num_conformal_examples; ++conformal_i) {
       // TODO torch::Tensor to ptr is not stable
-      if (global_pred_distances_[num_global_train_examples + i] > constant::MIN_VALUE &&
-          global_pred_distances_[num_global_train_examples + i] < constant::MAX_VALUE &&
-          !upcite::equals_zero(global_pred_distances_[num_global_train_examples + i])) {
+      if (global_pred_distances_[num_global_train_examples + conformal_i] > constant::MIN_VALUE &&
+          global_pred_distances_[num_global_train_examples + conformal_i] < constant::MAX_VALUE &&
+          !upcite::equals_zero(global_pred_distances_[num_global_train_examples + conformal_i])) {
         // TODO not necessary for global symmetrical confidence intervals
-        VALUE_TYPE diff = abs(global_pred_distances_[num_global_train_examples + i]
-                                  - global_lnn_distances_[num_global_train_examples + i]);
+        VALUE_TYPE diff = abs(global_pred_distances_[num_global_train_examples + conformal_i]
+                                  - global_lnn_distances_[num_global_train_examples + conformal_i]);
 
         if (diff > max_diff) {
           max_diff = diff;
@@ -192,7 +203,18 @@ RESPONSE dstree::Filter::fit_conformal_predictor(bool is_trial, bool collect_run
       fit_filter_conformal_spline(recalls);
     }
   } else if (!is_trial && !collect_runtime_stat) {
-    conformal_predictor_->fit(residuals);
+//    std::signal(SIGSEGV, sigfaultHandler);
+
+    RESPONSE return_code = FAILURE;
+    return_code = conformal_predictor_->fit(residuals);
+
+    if (return_code == FAILURE) {
+      spdlog::error("trial filter {:d} model {:s} failed to get made conformal (with {:d}/{:d} residuals); disable it",
+                    id_, model_setting_ref_.get().model_setting_str, residuals.size(), num_conformal_examples);
+
+      is_trained_ = false;
+      is_active_ = false;
+    }
   } else {
     spdlog::error("trial filter {:d} model {:s} both trial and collect modes were triggered",
                   id_, model_setting_ref_.get().model_setting_str);
@@ -488,6 +510,7 @@ RESPONSE dstree::Filter::train(bool is_trial) {
   model_->eval();
 
   auto prediction = model_->forward(global_queries_).detach().cpu();
+  assert(prediction.size(0) == global_data_size_);
   auto *predictions_array = prediction.detach().cpu().contiguous().data_ptr<VALUE_TYPE>();
 
   global_pred_distances_.insert(global_pred_distances_.end(), predictions_array, predictions_array + global_data_size_);
@@ -688,7 +711,6 @@ RESPONSE dstree::Filter::dump(std::ofstream &node_fos) const {
       node_fos.write(reinterpret_cast<const char *>(local_lnn_distances_.data()),
                      sizeof(VALUE_TYPE) * local_lnn_distances_.size());
     }
-
   }
 
 //  spdlog::debug("dump filter {:d} global {:d} local {:d} active {:b} train {:b}",
@@ -862,6 +884,13 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
   read_nbytes = sizeof(ID_TYPE);
   node_ifs.read(static_cast<char *>(ifs_buf), read_nbytes);
   size_indicator = ifs_id_buf[0];
+
+  if (size_indicator == 0 && is_active_) {
+    spdlog::error("loading filter {:d} activated but marked untrained; workaround by setting is_trained_",
+                  id_);
+    size_indicator = 1;
+  }
+
   if (size_indicator > 0) {
     std::string model_filepath = config_.get().load_filters_folderpath_ + std::to_string(id_) +
         config_.get().model_dump_file_postfix_;
@@ -909,8 +938,8 @@ RESPONSE dstree::Filter::load(std::ifstream &node_ifs, void *ifs_buf) {
     }
   }
 
-//  spdlog::debug("load filter {:d} global {:d} local {:d} active {:b} trained {:b}",
-//                id_, global_data_size_, local_data_size_, is_active_, is_trained_);
+  spdlog::debug("load filter {:d} global {:d} local {:d} active {:b} trained {:b}",
+                id_, global_data_size_, local_data_size_, is_active_, is_trained_);
 
   return SUCCESS;
 }

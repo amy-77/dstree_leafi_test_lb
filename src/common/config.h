@@ -156,6 +156,7 @@ class Config {
   VALUE_TYPE navigator_train_val_split_;
 
   bool to_profile_search_;
+  bool to_profile_search_exhausting_;
   bool to_profile_filters_;
 };
 

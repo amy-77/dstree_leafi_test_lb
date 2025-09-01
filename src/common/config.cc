@@ -114,6 +114,7 @@ dstree::Config::Config(int argc, char *argv[]) :
     filter_query_max_noise_(0.4),
     dump_query_folderpath_(""),
     to_profile_search_(false),
+    to_profile_search_exhausting_(false),
     to_profile_filters_(false),
     filter_fixed_node_size_threshold_(-1) {
   po::options_description po_desc("DSTree C++ implementation. Copyright (c) 2022 UPCité.");
@@ -315,7 +316,10 @@ dstree::Config::Config(int argc, char *argv[]) :
        "The max noise level to add to a random series to generate a synthetic query")
       ("to_profile_search",
        po::bool_switch(&to_profile_search_)->default_value(false),
-       "Whether to profile query answering")
+       "Whether to profile query answering (with early stopping)")
+      ("to_profile_search_exhausting",
+       po::bool_switch(&to_profile_search_exhausting_)->default_value(false),
+       "Whether to profile query answering (without early stopping)")
       ("to_profile_filters",
        po::bool_switch(&to_profile_filters_)->default_value(false),
        "Whether to profile query answering")
@@ -403,6 +407,13 @@ dstree::Config::Config(int argc, char *argv[]) :
         }
 
         filter_conformal_confidence_ = filter_conformal_default_confidence_;
+      }
+
+      if (filter_conformal_is_smoothen_) {
+        if (filter_conformal_core_type_ != "spline") {
+          spdlog::info("leafi conformal core {:s} is not supported for smoothening; roll back to spline",
+                       filter_conformal_core_type_);
+        }
       }
     }
 
@@ -578,6 +589,10 @@ dstree::Config::Config(int argc, char *argv[]) :
       filter_train_batchsize_ = filter_train_nexample_;
     }
   }
+
+  if (to_profile_search_exhausting_) {
+    to_profile_search_ = true;
+  }
 }
 
 void dstree::Config::log() {
@@ -702,6 +717,7 @@ void dstree::Config::log() {
   spdlog::info("dump_query_folderpath = {:s}", dump_query_folderpath_);
 
   spdlog::info("to_profile_search = {:b}", to_profile_search_);
+  spdlog::info("to_profile_search_exhausting = {:b}", to_profile_search_exhausting_);
   spdlog::info("to_profile_filters = {:b}", to_profile_filters_);
 
   spdlog::info("filter_fixed_node_size_threshold = {:d}", filter_fixed_node_size_threshold_);

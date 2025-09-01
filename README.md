@@ -15,7 +15,8 @@ nohup ./dstree --db_filepath /mnthdd/data/indexing/deep1b/deep1b-96-25m.bin --qu
 
 
 ## 测试查询deep1b-96-10m-test-0.2-1k.bin的结果：
-
+### 可以查看thalia服务器的目录：/home/qwang/projects/dstree/index_dump_25M_q10，这是我train好的索引，可以直接load
+### 整个dstree项目位于/home/qwang/projects/dstree
 1）同时打开filter+lower bound：
 Overall Lower Bound Pruning Statistics:
 Total series that could be visited: 25000000000
